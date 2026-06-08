@@ -24,6 +24,7 @@ public:
 
     void addUnit(int unitId);
     void removeUnit(int unitId);
+    void clearUnits();
     bool ownsUnit(int unitId) const;
 
 private:

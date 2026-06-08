@@ -19,6 +19,7 @@ public:
 
 private slots:
     void onResetButtonClicked();
+    void onStartCombatButtonClicked();
 
 protected:
     void resizeEvent(QResizeEvent* event) override;
@@ -31,6 +32,13 @@ private:
     QVBoxLayout* m_mainLayout;
     QGraphicsView* m_view;
     QPushButton* m_resetButton;
+    QPushButton* m_startCombatButton;
+    QPushButton* m_buyButtons[5];
+    QPushButton* m_rerollButton;
+    QPushButton* m_levelUpButton;
+    QPushButton* m_equipButton;
+    QPushButton* m_saveButton;
+    QPushButton* m_loadButton;
     Game* m_game;
 };
 

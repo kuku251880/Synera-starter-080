@@ -11,6 +11,22 @@ enum class UnitOwner
     EnemyCtrl
 };
 
+enum class UnitState
+{
+    Idle,
+    Moving,
+    Attacking,
+    Casting,
+    Dead
+};
+
+enum class SkillType
+{
+    PowerStrike,
+    SelfHeal,
+    ArcaneBurst
+};
+
 class Unit
 {
 public:
@@ -20,7 +36,8 @@ public:
          int range = 1,
          int maxMana = 100,
          UnitOwner owner = UnitOwner::PlayerCtrl,
-         const QStringList& traits = QStringList());
+         const QStringList& traits = QStringList(),
+         SkillType skillType = SkillType::PowerStrike);
     ~Unit() = default;
 
     int id() const { return m_id; }
@@ -34,6 +51,13 @@ public:
     int mana() const { return m_mana; }
     UnitOwner owner() const { return m_owner; }
     QStringList traits() const { return m_traits; }
+    UnitState state() const { return m_state; }
+    SkillType skillType() const { return m_skillType; }
+    int attackCooldown() const { return m_attackCooldown; }
+    int moveCooldown() const { return m_moveCooldown; }
+    int attackInterval() const { return m_attackInterval; }
+    int starLevel() const { return m_starLevel; }
+    QStringList equipmentNames() const { return m_equipmentNames; }
     bool isAlive() const { return m_hp > 0; }
 
     void setName(const QString& name) { m_name = name; }
@@ -46,6 +70,14 @@ public:
     void setMana(int mana) { m_mana = mana; }
     void setOwner(UnitOwner owner) { m_owner = owner; }
     void setTraits(const QStringList& traits) { m_traits = traits; }
+    void setState(UnitState state) { m_state = state; }
+    void setSkillType(SkillType skillType) { m_skillType = skillType; }
+    void setAttackCooldown(int cooldown) { m_attackCooldown = cooldown; }
+    void setMoveCooldown(int cooldown) { m_moveCooldown = cooldown; }
+    void setAttackInterval(int interval) { m_attackInterval = interval; }
+    void setStarLevel(int starLevel) { m_starLevel = starLevel; }
+    void addEquipmentName(const QString& name) { m_equipmentNames.append(name); }
+    void resetCombatState();
 
 private:
     static int s_nextId;
@@ -61,6 +93,13 @@ private:
     int m_mana;
     UnitOwner m_owner;
     QStringList m_traits;
+    UnitState m_state;
+    SkillType m_skillType;
+    int m_attackCooldown;
+    int m_moveCooldown;
+    int m_attackInterval;
+    int m_starLevel;
+    QStringList m_equipmentNames;
 };
 
 #endif // UNIT_H

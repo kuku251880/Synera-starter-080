@@ -2,7 +2,7 @@
 
 Player::Player()
     : m_hp(100)
-    , m_gold(0)
+    , m_gold(10)
     , m_level(1)
     , m_populationLimit(4)
     , m_currentRound(1)
@@ -16,6 +16,11 @@ void Player::addUnit(int unitId)
 void Player::removeUnit(int unitId)
 {
     m_ownedUnitIds.remove(unitId);
+}
+
+void Player::clearUnits()
+{
+    m_ownedUnitIds.clear();
 }
 
 bool Player::ownsUnit(int unitId) const

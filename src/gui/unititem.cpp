@@ -10,6 +10,7 @@ UnitItem::UnitItem(Unit* unit, QGraphicsItem* parent)
     , m_unit(unit)
     , m_gridPos(-1, -1)
     , m_dragging(false)
+    , m_dragEnabled(true)
     , m_dragOffset(0.0, 0.0)
     , m_spriteTried(false)
 {
@@ -72,13 +73,9 @@ void UnitItem::paintStatusOverlay(QPainter* painter) const
         return;
     }
 
-    const QColor ownerColor = m_unit->owner() == UnitOwner::PlayerCtrl
-        ? QColor(90, 150, 255)
+    const QColor hpColor = m_unit->owner() == UnitOwner::PlayerCtrl
+        ? QColor(70, 205, 92)
         : QColor(230, 92, 92);
-
-    painter->setPen(QPen(ownerColor, 2));
-    painter->setBrush(Qt::NoBrush);
-    painter->drawRoundedRect(QRectF(-42, -42, 84, 84), 4, 4);
 
     const qreal barWidth = 74.0;
     const qreal barHeight = 6.0;
@@ -93,7 +90,7 @@ void UnitItem::paintStatusOverlay(QPainter* painter) const
     painter->drawRect(manaBack);
 
     painter->setPen(Qt::NoPen);
-    painter->setBrush(QColor(70, 205, 92));
+    painter->setBrush(hpColor);
     painter->drawRect(QRectF(hpBack.left(), hpBack.top(), hpBack.width() * hpRatio, hpBack.height()));
     painter->setBrush(QColor(80, 150, 255));
     painter->drawRect(QRectF(manaBack.left(), manaBack.top(), manaBack.width() * manaRatio, manaBack.height()));
@@ -104,10 +101,10 @@ void UnitItem::paintStatusOverlay(QPainter* painter) const
     painter->setFont(font);
     painter->setPen(Qt::white);
     painter->drawText(QRectF(-42, 38, 84, 12), Qt::AlignCenter,
-                      QStringLiteral("HP%1 A%2 R%3")
+                      QStringLiteral("%1星 血%2 攻%3")
+                          .arg(m_unit->starLevel())
                           .arg(m_unit->hp())
-                          .arg(m_unit->atk())
-                          .arg(m_unit->range()));
+                          .arg(m_unit->atk()));
 }
 
 void UnitItem::ensureSpriteLoaded() const
@@ -153,25 +150,25 @@ QString UnitItem::spriteRelativePathForUnit() const
     }
 
     const QString name = m_unit->name();
-    if (name == QStringLiteral("Warrior")) {
+    if (name == QStringLiteral("战士") || name == QStringLiteral("Warrior")) {
         return QStringLiteral("assets/craftpix-reaper-man-chibi-2d-game-sprites/Reaper_Man_1/PNG/PNG Sequences/Idle/0_Reaper_Man_Idle_000.png");
     }
-    if (name == QStringLiteral("Archer")) {
+    if (name == QStringLiteral("弓手") || name == QStringLiteral("Archer")) {
         return QStringLiteral("assets/craftpix-satyr-tiny-style-2d-sprites/PNG/Satyr_01/PNG Sequences/Idle/Satyr_01_Idle_000.png");
     }
-    if (name == QStringLiteral("Mage")) {
+    if (name == QStringLiteral("法师") || name == QStringLiteral("Mage")) {
         return QStringLiteral("assets/craftpix-reaper-man-chibi-2d-game-sprites/Reaper_Man_2/PNG/PNG Sequences/Idle/0_Reaper_Man_Idle_000.png");
     }
-    if (name == QStringLiteral("Reserve")) {
+    if (name == QStringLiteral("预备兵") || name == QStringLiteral("Reserve")) {
         return QStringLiteral("assets/craftpix-satyr-tiny-style-2d-sprites/PNG/Satyr_02/PNG Sequences/Idle/Satyr_02_Idle_000.png");
     }
-    if (name == QStringLiteral("Guard")) {
+    if (name == QStringLiteral("守卫") || name == QStringLiteral("Guard")) {
         return QStringLiteral("assets/craftpix-satyr-tiny-style-2d-sprites/PNG/Satyr_03/PNG Sequences/Idle/Satyr_03_Idle_000.png");
     }
-    if (name == QStringLiteral("Enemy Warrior")) {
+    if (name == QStringLiteral("敌方战士") || name == QStringLiteral("Enemy Warrior")) {
         return QStringLiteral("assets/craftpix-reaper-man-chibi-2d-game-sprites/Reaper_Man_3/PNG/PNG Sequences/Idle/0_Reaper_Man_Idle_000.png");
     }
-    if (name == QStringLiteral("Enemy Archer")) {
+    if (name == QStringLiteral("敌方弓手") || name == QStringLiteral("Enemy Archer")) {
         return QStringLiteral("assets/craftpix-satyr-tiny-style-2d-sprites/PNG/Satyr_03/PNG Sequences/Idle/Satyr_03_Idle_000.png");
     }
 
@@ -197,7 +194,7 @@ void UnitItem::mousePressEvent(QGraphicsSceneMouseEvent* event)
 
     emit unitSelected(unitId());
 
-    if (!m_unit || m_unit->owner() != UnitOwner::PlayerCtrl) {
+    if (!m_dragEnabled || !m_unit || m_unit->owner() != UnitOwner::PlayerCtrl) {
         event->accept();
         return;
     }
