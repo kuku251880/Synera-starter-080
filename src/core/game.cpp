@@ -2,6 +2,7 @@
 #include "entity/unit.h"
 #include "gui/griditem.h"
 #include "gui/unititem.h"
+#include <QGraphicsRectItem>
 #include <QGraphicsScene>
 #include <QGraphicsTextItem>
 #include <QtMath>
@@ -16,8 +17,10 @@ Game::Game(QObject* parent)
     : QObject(parent)
     , m_benchSlots(8, nullptr)
     , m_scene(new QGraphicsScene(this))
+    , m_infoPanel(nullptr)
     , m_dragActive(false)
     , m_activeUnitId(-1)
+    , m_selectedUnitId(-1)
     , m_sourceGrid(-1, -1)
     , m_rows(Board::ROWS)
     , m_cols(Board::COLS)
@@ -44,6 +47,8 @@ void Game::reset()
 {
     m_board.clear();
     m_benchSlots.fill(nullptr, m_benchSlotCount);
+    m_player.setCurrentRound(1);
+    generateEnemyRound(m_player.currentRound());
 
     const QPoint playerPositions[] = {
         QPoint(0, 7),
@@ -151,19 +156,72 @@ void Game::handleDropCommand(int unitId, const QPoint&, const QPointF& scenePos)
     syncFromBoard();
 }
 
+void Game::handleUnitSelected(int unitId)
+{
+    if (!findUnitById(unitId)) {
+        return;
+    }
+
+    m_selectedUnitId = unitId;
+    updateInfoPanel();
+}
+
 void Game::createStarterUnitsIfNeeded()
 {
     if (!m_units.isEmpty()) {
         return;
     }
 
-    m_units.append(new Unit("Warrior", 120, 14, 1, 80, UnitOwner::PlayerCtrl, {"Frontline", "Human"}));
-    m_units.append(new Unit("Archer", 80, 18, 3, 60, UnitOwner::PlayerCtrl, {"Ranger", "Human"}));
-    m_units.append(new Unit("Mage", 70, 22, 3, 100, UnitOwner::PlayerCtrl, {"Arcane", "Human"}));
-    m_units.append(new Unit("Reserve", 95, 12, 1, 70, UnitOwner::PlayerCtrl, {"Frontline"}));
-    m_units.append(new Unit("Guard", 140, 10, 1, 90, UnitOwner::PlayerCtrl, {"Frontline"}));
-    m_units.append(new Unit("Enemy Warrior", 120, 15, 1, 80, UnitOwner::EnemyCtrl, {"Frontline", "Enemy"}));
-    m_units.append(new Unit("Enemy Archer", 85, 18, 3, 60, UnitOwner::EnemyCtrl, {"Ranger", "Enemy"}));
+    auto addPlayerUnit = [this](Unit* unit) {
+        m_units.append(unit);
+        m_player.addUnit(unit->id());
+        if (m_selectedUnitId < 0) {
+            m_selectedUnitId = unit->id();
+        }
+    };
+
+    addPlayerUnit(new Unit("Warrior", 120, 14, 1, 80, UnitOwner::PlayerCtrl, {"Frontline", "Human"}));
+    addPlayerUnit(new Unit("Archer", 80, 18, 3, 60, UnitOwner::PlayerCtrl, {"Ranger", "Human"}));
+    addPlayerUnit(new Unit("Mage", 70, 22, 3, 100, UnitOwner::PlayerCtrl, {"Arcane", "Human"}));
+    addPlayerUnit(new Unit("Reserve", 95, 12, 1, 70, UnitOwner::PlayerCtrl, {"Frontline"}));
+    addPlayerUnit(new Unit("Guard", 140, 10, 1, 90, UnitOwner::PlayerCtrl, {"Frontline"}));
+
+    generateEnemyRound(m_player.currentRound());
+}
+
+void Game::generateEnemyRound(int round)
+{
+    auto findEnemyByName = [this](const QString& name) -> Unit* {
+        for (Unit* unit : m_units) {
+            if (unit && unit->owner() == UnitOwner::EnemyCtrl && unit->name() == name) {
+                return unit;
+            }
+        }
+        return nullptr;
+    };
+
+    Unit* enemyWarrior = findEnemyByName(QStringLiteral("Enemy Warrior"));
+    if (!enemyWarrior) {
+        enemyWarrior = new Unit("Enemy Warrior", 120, 15, 1, 80, UnitOwner::EnemyCtrl, {"Frontline", "Enemy"});
+        m_units.append(enemyWarrior);
+    }
+
+    Unit* enemyArcher = findEnemyByName(QStringLiteral("Enemy Archer"));
+    if (!enemyArcher) {
+        enemyArcher = new Unit("Enemy Archer", 85, 18, 3, 60, UnitOwner::EnemyCtrl, {"Ranger", "Enemy"});
+        m_units.append(enemyArcher);
+    }
+
+    const int growth = qMax(0, round - 1) * 20;
+    enemyWarrior->setMaxHp(120 + growth);
+    enemyWarrior->setHp(enemyWarrior->maxHp());
+    enemyWarrior->setAtk(15 + qMax(0, round - 1) * 2);
+    enemyWarrior->setMana(0);
+
+    enemyArcher->setMaxHp(85 + growth);
+    enemyArcher->setHp(enemyArcher->maxHp());
+    enemyArcher->setAtk(18 + qMax(0, round - 1) * 2);
+    enemyArcher->setMana(0);
 }
 
 Unit* Game::findUnitById(int unitId) const
@@ -223,6 +281,23 @@ Unit* Game::unitAtGrid(const QPoint& gridPos) const
     return nullptr;
 }
 
+int Game::playerBoardUnitCount() const
+{
+    int count = 0;
+    for (Unit* unit : m_units) {
+        if (!unit || unit->owner() != UnitOwner::PlayerCtrl) {
+            continue;
+        }
+
+        const QPoint pos = unit->position();
+        if (m_board.isValidPosition(pos) && m_board.getUnitAt(pos) == unit) {
+            ++count;
+        }
+    }
+
+    return count;
+}
+
 void Game::clearGridHighlights()
 {
     for (GridItem* item : m_gridItems) {
@@ -258,7 +333,15 @@ bool Game::canApplyDrop(int unitId, const QPoint& source, const QPoint& target) 
     }
 
     if (isBoardPosition(target)) {
-        return m_board.isPlayerHalf(target) && !m_board.hasUnitAt(target);
+        if (!m_board.isPlayerHalf(target) || m_board.hasUnitAt(target)) {
+            return false;
+        }
+
+        if (isBenchPosition(source) && playerBoardUnitCount() >= m_player.populationLimit()) {
+            return false;
+        }
+
+        return true;
     }
 
     if (isBenchPosition(target)) {
@@ -292,6 +375,7 @@ void Game::applyDrop(int unitId, const QPoint& source, const QPoint& target)
 void Game::buildScene()
 {
     m_scene->clear();
+    m_infoPanel = nullptr;
     m_gridItems.clear();
     m_unitItems.clear();
     m_unitItemById.clear();
@@ -345,6 +429,22 @@ void Game::buildScene()
     benchLabel->setZValue(kZGrid + 0.1);
     benchLabel->setPos(0, benchToWorld(0).y() - 54);
 
+    const qreal panelX = gridToWorld(0, Board::COLS - 1).x() + 96.0;
+    const QRectF panelRect(panelX, -40.0, 260.0, 360.0);
+    QGraphicsRectItem* panelBack = m_scene->addRect(
+        panelRect,
+        QPen(QColor(90, 90, 95), 1),
+        QBrush(QColor(32, 32, 36, 210)));
+    panelBack->setZValue(kZGrid + 0.05);
+
+    m_infoPanel = m_scene->addText(QString(), labelFont);
+    m_infoPanel->setDefaultTextColor(QColor(235, 235, 235));
+    m_infoPanel->setTextWidth(panelRect.width() - 20.0);
+    m_infoPanel->setZValue(kZGrid + 0.1);
+    m_infoPanel->setPos(panelRect.left() + 10.0, panelRect.top() + 10.0);
+    updateInfoPanel();
+    totalBounds = totalBounds.united(panelRect);
+
     for (Unit* unit : m_units) {
         UnitItem* unitItem = new UnitItem(unit);
         unitItem->setZValue(kZUnit);
@@ -352,6 +452,8 @@ void Game::buildScene()
         m_unitItems.push_back(unitItem);
         m_unitItemById[unit->id()] = unitItem;
 
+        connect(unitItem, &UnitItem::unitSelected,
+                this, &Game::handleUnitSelected);
         connect(unitItem, &UnitItem::dragStarted,
                 this, &Game::handleDragStarted);
         connect(unitItem, &UnitItem::dragMoved,
@@ -392,6 +494,74 @@ void Game::syncFromBoard()
         item->setPos(gridToWorld(pos.y(), pos.x()));
         item->setZValue(kZUnit);
     }
+
+    updateInfoPanel();
+}
+
+void Game::updateInfoPanel()
+{
+    if (!m_infoPanel) {
+        return;
+    }
+
+    const Unit* selected = findUnitById(m_selectedUnitId);
+    QString ownerText;
+    QString unitText = QStringLiteral("Selected Unit\nNone");
+
+    if (selected) {
+        ownerText = selected->owner() == UnitOwner::PlayerCtrl
+            ? QStringLiteral("PlayerCtrl")
+            : QStringLiteral("EnemyCtrl");
+
+        unitText = QStringLiteral(
+            "Selected Unit\n"
+            "%1\n"
+            "Owner: %2\n"
+            "HP: %3/%4\n"
+            "ATK: %5   Range: %6\n"
+            "Mana: %7/%8\n"
+            "Traits: %9")
+            .arg(selected->name())
+            .arg(ownerText)
+            .arg(selected->hp())
+            .arg(selected->maxHp())
+            .arg(selected->atk())
+            .arg(selected->range())
+            .arg(selected->mana())
+            .arg(selected->maxMana())
+            .arg(selected->traits().join(QStringLiteral(", ")));
+    }
+
+    int benchUsed = 0;
+    for (Unit* unit : m_benchSlots) {
+        if (unit) {
+            ++benchUsed;
+        }
+    }
+
+    const QString text = QStringLiteral(
+        "Player\n"
+        "HP: %1\n"
+        "Gold: %2\n"
+        "Level: %3\n"
+        "Round: %4\n"
+        "Board Units: %5/%6\n"
+        "Bench: %7/%8\n\n"
+        "%9\n\n"
+        "Drag player units between\n"
+        "Player Half and Bench.\n"
+        "Invalid drops rebound.")
+        .arg(m_player.hp())
+        .arg(m_player.gold())
+        .arg(m_player.level())
+        .arg(m_player.currentRound())
+        .arg(playerBoardUnitCount())
+        .arg(m_player.populationLimit())
+        .arg(benchUsed)
+        .arg(m_benchSlotCount)
+        .arg(unitText);
+
+    m_infoPanel->setPlainText(text);
 }
 
 QPointF Game::gridToWorld(int row, int col) const

@@ -4,6 +4,8 @@
 #include <QHBoxLayout>
 #include <QPainter>
 #include <QPushButton>
+#include <QResizeEvent>
+#include <QTimer>
 #include <QVBoxLayout>
 
 GameWindow::GameWindow(QWidget* parent)
@@ -16,6 +18,7 @@ GameWindow::GameWindow(QWidget* parent)
 {
     setupUI();
     m_game->initialize();
+    QTimer::singleShot(0, this, &GameWindow::fitSceneInView);
 }
 
 GameWindow::~GameWindow() = default;
@@ -24,7 +27,14 @@ void GameWindow::onResetButtonClicked()
 {
     if (m_game) {
         m_game->reset();
+        fitSceneInView();
     }
+}
+
+void GameWindow::resizeEvent(QResizeEvent* event)
+{
+    QMainWindow::resizeEvent(event);
+    fitSceneInView();
 }
 
 void GameWindow::setupUI()
@@ -78,4 +88,16 @@ void GameWindow::setupUI()
             this, &GameWindow::onResetButtonClicked);
 
     m_view->setScene(m_game->scene());
+}
+
+void GameWindow::fitSceneInView()
+{
+    if (!m_view || !m_game || !m_game->scene()) {
+        return;
+    }
+
+    const QRectF sceneRect = m_game->scene()->sceneRect();
+    if (!sceneRect.isEmpty()) {
+        m_view->fitInView(sceneRect, Qt::KeepAspectRatio);
+    }
 }

@@ -4,7 +4,7 @@ Player::Player()
     : m_hp(100)
     , m_gold(0)
     , m_level(1)
-    , m_populationLimit(3)
+    , m_populationLimit(4)
     , m_currentRound(1)
 {}
 

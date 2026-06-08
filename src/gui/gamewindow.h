@@ -7,6 +7,7 @@ class Game;
 class QGraphicsView;
 class QPushButton;
 class QVBoxLayout;
+class QResizeEvent;
 
 class GameWindow : public QMainWindow
 {
@@ -19,8 +20,12 @@ public:
 private slots:
     void onResetButtonClicked();
 
+protected:
+    void resizeEvent(QResizeEvent* event) override;
+
 private:
     void setupUI();
+    void fitSceneInView();
 
     QWidget* m_centralWidget;
     QVBoxLayout* m_mainLayout;

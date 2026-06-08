@@ -1,5 +1,0 @@
-C:/Users/17861/Desktop/Advanced Programming/homework/Synera_starter(2)/build/Desktop_Qt_6_11_1_MinGW_64_bit-Debug/CMakeFiles/Synera_Starter.dir
-C:/Users/17861/Desktop/Advanced Programming/homework/Synera_starter(2)/build/Desktop_Qt_6_11_1_MinGW_64_bit-Debug/CMakeFiles/edit_cache.dir
-C:/Users/17861/Desktop/Advanced Programming/homework/Synera_starter(2)/build/Desktop_Qt_6_11_1_MinGW_64_bit-Debug/CMakeFiles/rebuild_cache.dir
-C:/Users/17861/Desktop/Advanced Programming/homework/Synera_starter(2)/build/Desktop_Qt_6_11_1_MinGW_64_bit-Debug/CMakeFiles/Synera_Starter_autogen_timestamp_deps.dir
-C:/Users/17861/Desktop/Advanced Programming/homework/Synera_starter(2)/build/Desktop_Qt_6_11_1_MinGW_64_bit-Debug/CMakeFiles/Synera_Starter_autogen.dir

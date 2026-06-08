@@ -1,0 +1,25 @@
+# 编译输出
+build/
+cmake-build-*/
+*.o
+*.obj
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Qt 生成
+*.pro.user
+*.pro.user.*
+.qmake.stash
+.qtcreator/
+
+# IDE
+.idea/
+.vscode/
+*.suo
+*.user
+
+# 日志
+*.log
+*.tmp

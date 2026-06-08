@@ -10,6 +10,7 @@ UnitItem::UnitItem(Unit* unit, QGraphicsItem* parent)
     , m_unit(unit)
     , m_gridPos(-1, -1)
     , m_dragging(false)
+    , m_dragOffset(0.0, 0.0)
     , m_spriteTried(false)
 {
     setAcceptedMouseButtons(Qt::LeftButton);
@@ -103,7 +104,7 @@ void UnitItem::paintStatusOverlay(QPainter* painter) const
     painter->setFont(font);
     painter->setPen(Qt::white);
     painter->drawText(QRectF(-42, 38, 84, 12), Qt::AlignCenter,
-                      QStringLiteral("HP %1  ATK %2  R%3")
+                      QStringLiteral("HP%1 A%2 R%3")
                           .arg(m_unit->hp())
                           .arg(m_unit->atk())
                           .arg(m_unit->range()));
@@ -194,7 +195,16 @@ void UnitItem::mousePressEvent(QGraphicsSceneMouseEvent* event)
         return;
     }
 
+    emit unitSelected(unitId());
+
+    if (!m_unit || m_unit->owner() != UnitOwner::PlayerCtrl) {
+        event->accept();
+        return;
+    }
+
     m_dragging = true;
+    m_dragOffset = pos() - event->scenePos();
+    setOpacity(0.82);
     emit dragStarted(unitId(), m_gridPos, event->scenePos());
     event->accept();
 }
@@ -206,6 +216,7 @@ void UnitItem::mouseMoveEvent(QGraphicsSceneMouseEvent* event)
         return;
     }
 
+    setPos(event->scenePos() + m_dragOffset);
     emit dragMoved(unitId(), m_gridPos, event->scenePos());
     event->accept();
 }
@@ -218,6 +229,7 @@ void UnitItem::mouseReleaseEvent(QGraphicsSceneMouseEvent* event)
     }
 
     m_dragging = false;
+    setOpacity(1.0);
     emit dragDropped(unitId(), m_gridPos, event->scenePos());
     event->accept();
 }

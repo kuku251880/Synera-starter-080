@@ -3,6 +3,7 @@
 
 #include <QGraphicsObject>
 #include <QPoint>
+#include <QPointF>
 #include <QPixmap>
 
 class Unit;
@@ -24,6 +25,7 @@ public:
     QPoint gridPos() const { return m_gridPos; }
 
 signals:
+    void unitSelected(int unitId);
     void dragStarted(int unitId, const QPoint& sourceGrid, const QPointF& scenePos);
     void dragMoved(int unitId, const QPoint& sourceGrid, const QPointF& scenePos);
     void dragDropped(int unitId, const QPoint& sourceGrid, const QPointF& scenePos);
@@ -42,6 +44,7 @@ private:
     Unit* m_unit;
     QPoint m_gridPos;
     bool m_dragging;
+    QPointF m_dragOffset;
     mutable QPixmap m_sprite;
     mutable bool m_spriteTried;
 };
