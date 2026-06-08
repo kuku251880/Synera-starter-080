@@ -1,0 +1,48 @@
+# ninja log v7
+20	30938	8026107377165704	Synera_Starter_autogen/timestamp	736a02fd0cfe3935
+20	30938	8026107377165704	Synera_Starter_autogen/mocs_compilation.cpp	736a02fd0cfe3935
+20	30938	8026107377165704	C:/Users/17861/Desktop/Advanced Programming/homework/Synera_starter(2)/build/Desktop_Qt_6_11_1_MinGW_64_bit-Debug/Synera_Starter_autogen/timestamp	736a02fd0cfe3935
+20	30938	8026107377165704	C:/Users/17861/Desktop/Advanced Programming/homework/Synera_starter(2)/build/Desktop_Qt_6_11_1_MinGW_64_bit-Debug/Synera_Starter_autogen/mocs_compilation.cpp	736a02fd0cfe3935
+30972	32073	8026107378392524	CMakeFiles/Synera_Starter.dir/src/entity/unit.cpp.obj	dd4843597d9b2b1f
+30949	32196	8026107378169763	CMakeFiles/Synera_Starter.dir/src/core/board.cpp.obj	cd3646ea8bf57096
+2639	7727	8026084270119239	CMakeFiles/Synera_Starter.dir/src/main.cpp.obj	2adb0ed7d15d1aca
+2592	7789	8026084269656995	CMakeFiles/Synera_Starter.dir/src/gui/griditem.cpp.obj	9f91df51c473148f
+30939	32868	8026107378100840	CMakeFiles/Synera_Starter.dir/Synera_Starter_autogen/mocs_compilation.cpp.obj	795945db4d6596fb
+30986	32861	8026107378563068	CMakeFiles/Synera_Starter.dir/src/gui/gamewindow.cpp.obj	b2c328c17b451a58
+30959	33070	8026107378300359	CMakeFiles/Synera_Starter.dir/src/core/game.cpp.obj	3986162cc3e7043d
+31000	33275	8026107378679399	CMakeFiles/Synera_Starter.dir/src/gui/unititem.cpp.obj	8a86e6897db7ab1f
+33276	33789	8026107401468939	Synera_Starter.exe	17d0ac8c7d8312c6
+24	32230	8026108531520668	Synera_Starter_autogen/timestamp	73c4383374e22f95
+24	32230	8026108531520668	Synera_Starter_autogen/mocs_compilation.cpp	73c4383374e22f95
+24	32230	8026108531520668	C:/Users/17861/Desktop/Advanced Programming/homework/Synera_starter(2)/build/Desktop_Qt_6_11_1_MinGW_64_bit-Debug/Synera_Starter_autogen/timestamp	73c4383374e22f95
+24	32230	8026108531520668	C:/Users/17861/Desktop/Advanced Programming/homework/Synera_starter(2)/build/Desktop_Qt_6_11_1_MinGW_64_bit-Debug/Synera_Starter_autogen/mocs_compilation.cpp	73c4383374e22f95
+32307	35558	8026108536166469	CMakeFiles/Synera_Starter.dir/src/entity/player.cpp.obj	4a94e2ad5ac639fc
+32243	36780	8026108535504401	CMakeFiles/Synera_Starter.dir/Synera_Starter_autogen/mocs_compilation.cpp.obj	795945db4d6596fb
+36780	37641	8026108580886812	Synera_Starter.exe	3b0292efb5ca14ff
+121	31439	8026161045882372	Synera_Starter_autogen/timestamp	73c4383374e22f95
+121	31439	8026161045882372	Synera_Starter_autogen/mocs_compilation.cpp	73c4383374e22f95
+121	31439	8026161045882372	C:/Users/17861/Desktop/Advanced Programming/homework/Synera_starter(2)/build/Desktop_Qt_6_11_1_MinGW_64_bit-Debug/Synera_Starter_autogen/timestamp	73c4383374e22f95
+121	31439	8026161045882372	C:/Users/17861/Desktop/Advanced Programming/homework/Synera_starter(2)/build/Desktop_Qt_6_11_1_MinGW_64_bit-Debug/Synera_Starter_autogen/mocs_compilation.cpp	73c4383374e22f95
+31503	32653	8026161047277785	CMakeFiles/Synera_Starter.dir/src/entity/unit.cpp.obj	dd4843597d9b2b1f
+31482	32754	8026161047012210	CMakeFiles/Synera_Starter.dir/src/core/board.cpp.obj	cd3646ea8bf57096
+31514	33392	8026161047375733	CMakeFiles/Synera_Starter.dir/src/gui/gamewindow.cpp.obj	b2c328c17b451a58
+31440	33408	8026161046649519	CMakeFiles/Synera_Starter.dir/Synera_Starter_autogen/mocs_compilation.cpp.obj	795945db4d6596fb
+31492	33628	8026161047165329	CMakeFiles/Synera_Starter.dir/src/core/game.cpp.obj	3986162cc3e7043d
+31525	33826	8026161047489841	CMakeFiles/Synera_Starter.dir/src/gui/unititem.cpp.obj	8a86e6897db7ab1f
+33826	34416	8026161070505756	Synera_Starter.exe	3b0292efb5ca14ff
+8	87	8026161660793686	CMakeFiles/clean.additional	eccaa5b121124637
+87	101	8026161661574880	clean	aa9fdaabb0931c11
+13	790	8026161669913060	Synera_Starter_autogen/timestamp	73c4383374e22f95
+13	790	8026161669913060	Synera_Starter_autogen/mocs_compilation.cpp	73c4383374e22f95
+13	790	8026161669913060	C:/Users/17861/Desktop/Advanced Programming/homework/Synera_starter(2)/build/Desktop_Qt_6_11_1_MinGW_64_bit-Debug/Synera_Starter_autogen/timestamp	73c4383374e22f95
+13	790	8026161669913060	C:/Users/17861/Desktop/Advanced Programming/homework/Synera_starter(2)/build/Desktop_Qt_6_11_1_MinGW_64_bit-Debug/Synera_Starter_autogen/mocs_compilation.cpp	73c4383374e22f95
+838	1973	8026161671153864	CMakeFiles/Synera_Starter.dir/src/entity/unit.cpp.obj	dd4843597d9b2b1f
+825	1984	8026161671023411	CMakeFiles/Synera_Starter.dir/src/entity/player.cpp.obj	4a94e2ad5ac639fc
+801	2034	8026161670779840	CMakeFiles/Synera_Starter.dir/src/core/board.cpp.obj	cd3646ea8bf57096
+892	2674	8026161671704706	CMakeFiles/Synera_Starter.dir/src/main.cpp.obj	2adb0ed7d15d1aca
+863	2687	8026161671408467	CMakeFiles/Synera_Starter.dir/src/gui/griditem.cpp.obj	9f91df51c473148f
+791	2727	8026161670688451	CMakeFiles/Synera_Starter.dir/Synera_Starter_autogen/mocs_compilation.cpp.obj	795945db4d6596fb
+851	2734	8026161671279867	CMakeFiles/Synera_Starter.dir/src/gui/gamewindow.cpp.obj	b2c328c17b451a58
+812	2928	8026161670860684	CMakeFiles/Synera_Starter.dir/src/core/game.cpp.obj	3986162cc3e7043d
+877	3214	8026161671557111	CMakeFiles/Synera_Starter.dir/src/gui/unititem.cpp.obj	8a86e6897db7ab1f
+3214	3655	8026161694888128	Synera_Starter.exe	3b0292efb5ca14ff
