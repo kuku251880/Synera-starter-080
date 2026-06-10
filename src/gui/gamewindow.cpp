@@ -4,6 +4,7 @@
 #include <QDialog>
 #include <QFileInfo>
 #include <QGraphicsView>
+#include <QHash>
 #include <QHBoxLayout>
 #include <QIcon>
 #include <QLabel>
@@ -21,35 +22,43 @@ namespace {
 QString spriteRelativePathForShopUnit(const QString& name)
 {
     if (name == QStringLiteral("战士") || name == QStringLiteral("Warrior")) {
-        return QStringLiteral("assets/craftpix-reaper-man-chibi-2d-game-sprites/Reaper_Man_1/PNG/PNG Sequences/Idle/0_Reaper_Man_Idle_000.png");
+        return QStringLiteral("assets/craftpix-reaper-man-chibi-2d-game-sprites/Reaper_Man_1/PNG/PNG "
+                              "Sequences/Idle/0_Reaper_Man_Idle_000.png");
     }
     if (name == QStringLiteral("弓手") || name == QStringLiteral("Archer")) {
-        return QStringLiteral("assets/craftpix-satyr-tiny-style-2d-sprites/PNG/Satyr_01/PNG Sequences/Idle/Satyr_01_Idle_000.png");
+        return QStringLiteral(
+            "assets/craftpix-satyr-tiny-style-2d-sprites/PNG/Satyr_01/PNG Sequences/Idle/Satyr_01_Idle_000.png");
     }
     if (name == QStringLiteral("法师") || name == QStringLiteral("Mage")) {
-        return QStringLiteral("assets/craftpix-reaper-man-chibi-2d-game-sprites/Reaper_Man_2/PNG/PNG Sequences/Idle/0_Reaper_Man_Idle_000.png");
+        return QStringLiteral("assets/craftpix-reaper-man-chibi-2d-game-sprites/Reaper_Man_2/PNG/PNG "
+                              "Sequences/Idle/0_Reaper_Man_Idle_000.png");
     }
     if (name == QStringLiteral("预备兵") || name == QStringLiteral("Reserve")) {
-        return QStringLiteral("assets/craftpix-satyr-tiny-style-2d-sprites/PNG/Satyr_02/PNG Sequences/Idle/Satyr_02_Idle_000.png");
+        return QStringLiteral(
+            "assets/craftpix-satyr-tiny-style-2d-sprites/PNG/Satyr_02/PNG Sequences/Idle/Satyr_02_Idle_000.png");
     }
     if (name == QStringLiteral("守卫") || name == QStringLiteral("Guard")) {
-        return QStringLiteral("assets/craftpix-satyr-tiny-style-2d-sprites/PNG/Satyr_03/PNG Sequences/Idle/Satyr_03_Idle_000.png");
+        return QStringLiteral(
+            "assets/craftpix-satyr-tiny-style-2d-sprites/PNG/Satyr_03/PNG Sequences/Idle/Satyr_03_Idle_000.png");
     }
     return QString();
 }
 
 QPixmap loadShopPixmap(const QString& unitName)
 {
+    static QHash<QString, QPixmap> pixmapCache;
+    if (pixmapCache.contains(unitName)) {
+        return pixmapCache.value(unitName);
+    }
+
     const QString relativePath = spriteRelativePathForShopUnit(unitName);
     if (relativePath.isEmpty()) {
         return QPixmap();
     }
 
     const QString appDir = QCoreApplication::applicationDirPath();
-    const QString roots[] = {
-        QFileInfo(appDir + "/..").canonicalFilePath(),
-        QFileInfo(appDir + "/../..").canonicalFilePath()
-    };
+    const QString roots[] = {QFileInfo(appDir + "/..").canonicalFilePath(),
+                             QFileInfo(appDir + "/../..").canonicalFilePath()};
 
     QPixmap pixmap;
     for (const QString& root : roots) {
@@ -62,24 +71,21 @@ QPixmap loadShopPixmap(const QString& unitName)
         }
     }
 
+    pixmapCache.insert(unitName, pixmap);
     return pixmap;
 }
 
 } // namespace
 
 GameWindow::GameWindow(QWidget* parent)
-    : QMainWindow(parent)
-    , m_centralWidget(new QWidget(this))
-    , m_mainLayout(new QVBoxLayout())
-    , m_view(new QGraphicsView(this))
-    , m_resetButton(new QPushButton(QStringLiteral("重置"), this))
-    , m_startCombatButton(new QPushButton(QStringLiteral("开始战斗"), this))
-    , m_shopButton(new QPushButton(QStringLiteral("商店"), this))
-    , m_levelUpButton(new QPushButton(QStringLiteral("升级人口(6金)"), this))
-    , m_equipButton(new QPushButton(QStringLiteral("装备首件"), this))
-    , m_saveButton(new QPushButton(QStringLiteral("保存"), this))
-    , m_loadButton(new QPushButton(QStringLiteral("读取"), this))
-    , m_game(new Game(this))
+    : QMainWindow(parent), m_centralWidget(new QWidget(this)), m_mainLayout(new QVBoxLayout()),
+      m_view(new QGraphicsView(this)), m_resetButton(new QPushButton(QStringLiteral("重置"), this)),
+      m_startCombatButton(new QPushButton(QStringLiteral("开始战斗"), this)),
+      m_shopButton(new QPushButton(QStringLiteral("商店"), this)),
+      m_levelUpButton(new QPushButton(QStringLiteral("升级人口(6金)"), this)),
+      m_equipButton(new QPushButton(QStringLiteral("装备首件"), this)),
+      m_saveButton(new QPushButton(QStringLiteral("保存"), this)),
+      m_loadButton(new QPushButton(QStringLiteral("读取"), this)), m_game(new Game(this))
 {
     setupUI();
     m_game->initialize();
@@ -211,34 +217,21 @@ void GameWindow::setupUI()
 
     m_mainLayout->addWidget(controlBar);
 
-    connect(m_resetButton, &QPushButton::clicked,
-            this, &GameWindow::onResetButtonClicked);
-    connect(m_startCombatButton, &QPushButton::clicked,
-            this, &GameWindow::onStartCombatButtonClicked);
-    connect(m_shopButton, &QPushButton::clicked,
-            this, [this]() {
-                showShopDialog();
-            });
-    connect(m_levelUpButton, &QPushButton::clicked,
-            this, [this]() {
-                if (m_game) {
-                    m_game->levelUp();
-                }
-            });
-    connect(m_equipButton, &QPushButton::clicked,
-            this, [this]() {
-                if (m_game) {
-                    m_game->equipSelectedUnit();
-                }
-            });
-    connect(m_saveButton, &QPushButton::clicked,
-            this, [this]() {
-                showArchiveDialog(false);
-            });
-    connect(m_loadButton, &QPushButton::clicked,
-            this, [this]() {
-                showArchiveDialog(true);
-            });
+    connect(m_resetButton, &QPushButton::clicked, this, &GameWindow::onResetButtonClicked);
+    connect(m_startCombatButton, &QPushButton::clicked, this, &GameWindow::onStartCombatButtonClicked);
+    connect(m_shopButton, &QPushButton::clicked, this, [this]() { showShopDialog(); });
+    connect(m_levelUpButton, &QPushButton::clicked, this, [this]() {
+        if (m_game) {
+            m_game->levelUp();
+        }
+    });
+    connect(m_equipButton, &QPushButton::clicked, this, [this]() {
+        if (m_game) {
+            m_game->equipSelectedUnit();
+        }
+    });
+    connect(m_saveButton, &QPushButton::clicked, this, [this]() { showArchiveDialog(false); });
+    connect(m_loadButton, &QPushButton::clicked, this, [this]() { showArchiveDialog(true); });
 
     m_view->setScene(m_game->scene());
 }
@@ -365,42 +358,48 @@ void GameWindow::showShopDialog()
             if (unitName.isEmpty()) {
                 button->setIcon(QIcon());
                 button->setText(QStringLiteral("已售出"));
+                button->setToolTip(QStringLiteral("这个位置已经售出"));
                 button->setEnabled(false);
                 continue;
             }
 
+            const bool canAfford = m_game->playerGold() >= 3;
             const QPixmap pixmap = loadShopPixmap(unitName);
             button->setIcon(pixmap.isNull()
                                 ? QIcon()
                                 : QIcon(pixmap.scaled(128, 128, Qt::KeepAspectRatio, Qt::SmoothTransformation)));
-            button->setText(QStringLiteral("%1\n价格：3金币").arg(unitName));
-            button->setEnabled(m_game->playerGold() >= 3);
+            button->setText(canAfford ? QStringLiteral("%1\n价格：3金币").arg(unitName)
+                                      : QStringLiteral("%1\n价格：3金币\n金币不足").arg(unitName));
+            button->setToolTip(canAfford ? QStringLiteral("购买%1").arg(unitName)
+                                         : QStringLiteral("金币不足，无法购买%1").arg(unitName));
+            button->setEnabled(canAfford);
         }
-        refreshButton->setEnabled(m_game->playerGold() >= 2);
+        const bool canRefresh = m_game->playerGold() >= 2;
+        refreshButton->setText(canRefresh ? QStringLiteral("刷新(2金)") : QStringLiteral("刷新(2金不足)"));
+        refreshButton->setToolTip(canRefresh ? QStringLiteral("花费2金币刷新商店")
+                                             : QStringLiteral("金币不足，无法刷新商店"));
+        refreshButton->setEnabled(canRefresh);
     };
 
     for (int i = 0; i < buyButtons.size(); ++i) {
-        connect(buyButtons.at(i), &QPushButton::clicked,
-                &dialog, [this, i, &refreshView]() {
-                    if (!m_game) {
-                        return;
-                    }
-                    m_game->buyShopUnit(i);
-                    fitSceneInView();
-                    refreshView();
-                });
+        connect(buyButtons.at(i), &QPushButton::clicked, &dialog, [this, i, &refreshView]() {
+            if (!m_game) {
+                return;
+            }
+            m_game->buyShopUnit(i);
+            fitSceneInView();
+            refreshView();
+        });
     }
 
-    connect(refreshButton, &QPushButton::clicked,
-            &dialog, [this, &refreshView]() {
-                if (!m_game) {
-                    return;
-                }
-                m_game->rerollShop();
-                refreshView();
-            });
-    connect(cancelButton, &QPushButton::clicked,
-            &dialog, &QDialog::reject);
+    connect(refreshButton, &QPushButton::clicked, &dialog, [this, &refreshView]() {
+        if (!m_game) {
+            return;
+        }
+        m_game->rerollShop();
+        refreshView();
+    });
+    connect(cancelButton, &QPushButton::clicked, &dialog, &QDialog::reject);
 
     refreshView();
     dialog.exec();
@@ -479,35 +478,31 @@ void GameWindow::showArchiveDialog(bool loadMode)
         const bool exists = m_game->hasSaveSlot(slot);
         const QString timeText = m_game->saveSlotTimeText(slot);
         if (loadMode) {
-            slotButton->setText(exists
-                                    ? QStringLiteral("存档 %1    读取\n时间：%2").arg(slot).arg(timeText)
-                                    : QStringLiteral("存档 %1    空槽位\n时间：未保存").arg(slot));
+            slotButton->setText(exists ? QStringLiteral("存档 %1    读取\n时间：%2").arg(slot).arg(timeText)
+                                       : QStringLiteral("存档 %1    空槽位\n时间：未保存").arg(slot));
             slotButton->setEnabled(exists);
         } else {
-            slotButton->setText(exists
-                                    ? QStringLiteral("存档 %1    覆盖保存\n时间：%2").arg(slot).arg(timeText)
-                                    : QStringLiteral("存档 %1    新建保存\n时间：未保存").arg(slot));
+            slotButton->setText(exists ? QStringLiteral("存档 %1    覆盖保存\n时间：%2").arg(slot).arg(timeText)
+                                       : QStringLiteral("存档 %1    新建保存\n时间：未保存").arg(slot));
         }
 
-        connect(slotButton, &QPushButton::clicked,
-                &dialog, [this, &dialog, loadMode, slot]() {
-                    if (!m_game) {
-                        return;
-                    }
-                    if (loadMode) {
-                        m_game->loadGame(slot);
-                        fitSceneInView();
-                    } else {
-                        m_game->saveGame(slot);
-                    }
-                    dialog.accept();
-                });
+        connect(slotButton, &QPushButton::clicked, &dialog, [this, &dialog, loadMode, slot]() {
+            if (!m_game) {
+                return;
+            }
+            if (loadMode) {
+                m_game->loadGame(slot);
+                fitSceneInView();
+            } else {
+                m_game->saveGame(slot);
+            }
+            dialog.accept();
+        });
         slotLayout->addWidget(slotButton);
     }
 
     mainLayout->addLayout(slotLayout, 1);
-    connect(cancelButton, &QPushButton::clicked,
-            &dialog, &QDialog::reject);
+    connect(cancelButton, &QPushButton::clicked, &dialog, &QDialog::reject);
 
     dialog.exec();
 }

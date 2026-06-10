@@ -1,0 +1,82 @@
+{
+  "version": 1,
+  "units": [
+    {
+      "name": "战士",
+      "aliases": ["Warrior"],
+      "hp": 120,
+      "atk": 14,
+      "range": 1,
+      "maxMana": 80,
+      "traits": ["前排", "人类"],
+      "skillType": "PowerStrike",
+      "shopAvailable": true
+    },
+    {
+      "name": "弓手",
+      "aliases": ["Archer"],
+      "hp": 80,
+      "atk": 18,
+      "range": 3,
+      "maxMana": 60,
+      "traits": ["游侠", "人类"],
+      "skillType": "PowerStrike",
+      "shopAvailable": true
+    },
+    {
+      "name": "法师",
+      "aliases": ["Mage"],
+      "hp": 70,
+      "atk": 22,
+      "range": 3,
+      "maxMana": 100,
+      "traits": ["奥术", "人类"],
+      "skillType": "ArcaneBurst",
+      "shopAvailable": true
+    },
+    {
+      "name": "预备兵",
+      "aliases": ["Reserve"],
+      "hp": 95,
+      "atk": 12,
+      "range": 1,
+      "maxMana": 70,
+      "traits": ["前排", "游侠"],
+      "skillType": "SelfHeal",
+      "shopAvailable": true
+    },
+    {
+      "name": "守卫",
+      "aliases": ["Guard"],
+      "hp": 140,
+      "atk": 10,
+      "range": 1,
+      "maxMana": 90,
+      "traits": ["前排", "奥术"],
+      "skillType": "SelfHeal",
+      "shopAvailable": true
+    },
+    {
+      "name": "敌方战士",
+      "aliases": ["Enemy Warrior"],
+      "hp": 120,
+      "atk": 15,
+      "range": 1,
+      "maxMana": 80,
+      "traits": ["前排", "敌人"],
+      "skillType": "PowerStrike",
+      "shopAvailable": false
+    },
+    {
+      "name": "敌方弓手",
+      "aliases": ["Enemy Archer"],
+      "hp": 85,
+      "atk": 18,
+      "range": 3,
+      "maxMana": 60,
+      "traits": ["游侠", "敌人"],
+      "skillType": "ArcaneBurst",
+      "shopAvailable": false
+    }
+  ]
+}

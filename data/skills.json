@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "skills": [
+    {
+      "type": "PowerStrike",
+      "name": "强力一击",
+      "attackMultiplier": 2,
+      "flatDamage": 20,
+      "heal": 0,
+      "radius": 0
+    },
+    {
+      "type": "SelfHeal",
+      "name": "自我治疗",
+      "attackMultiplier": 0,
+      "flatDamage": 0,
+      "heal": 45,
+      "radius": 0
+    },
+    {
+      "type": "ArcaneBurst",
+      "name": "奥术爆裂",
+      "attackMultiplier": 1,
+      "flatDamage": 20,
+      "heal": 0,
+      "radius": 1
+    }
+  ]
+}

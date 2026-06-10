@@ -4,20 +4,14 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QGraphicsSceneMouseEvent>
+#include <QHash>
 #include <QPainter>
 #include <QTimerEvent>
 
 UnitItem::UnitItem(Unit* unit, QGraphicsItem* parent)
-    : QGraphicsObject(parent)
-    , m_unit(unit)
-    , m_gridPos(-1, -1)
-    , m_dragging(false)
-    , m_dragEnabled(true)
-    , m_selectedActive(false)
-    , m_deathAnimationFinished(false)
-    , m_animationFrameIndex(0)
-    , m_animationTimerId(0)
-    , m_dragOffset(0.0, 0.0)
+    : QGraphicsObject(parent), m_unit(unit), m_gridPos(-1, -1), m_dragging(false), m_dragEnabled(true),
+      m_selectedActive(false), m_deathAnimationFinished(false), m_animationFrameIndex(0), m_animationTimerId(0),
+      m_dragOffset(0.0, 0.0)
 {
     setAcceptedMouseButtons(Qt::LeftButton);
     m_animationTimerId = startTimer(90);
@@ -60,11 +54,7 @@ void UnitItem::paintFallbackToken(QPainter* painter) const
     painter->drawEllipse(QRectF(-14, 8, 28, 10));
 
     QPolygonF badge;
-    badge << QPointF(0, -15)
-          << QPointF(13, -7)
-          << QPointF(13, 7)
-          << QPointF(0, 15)
-          << QPointF(-13, 7)
+    badge << QPointF(0, -15) << QPointF(13, -7) << QPointF(13, 7) << QPointF(0, 15) << QPointF(-13, 7)
           << QPointF(-13, -7);
 
     painter->setPen(QPen(QColor(18, 18, 18), 1.5));
@@ -87,9 +77,7 @@ void UnitItem::paintStatusOverlay(QPainter* painter) const
         return;
     }
 
-    const QColor hpColor = m_unit->owner() == UnitOwner::PlayerCtrl
-        ? QColor(70, 205, 92)
-        : QColor(230, 92, 92);
+    const QColor hpColor = m_unit->owner() == UnitOwner::PlayerCtrl ? QColor(70, 205, 92) : QColor(230, 92, 92);
 
     const qreal barWidth = 56.0;
     const qreal barHeight = 4.0;
@@ -115,10 +103,7 @@ void UnitItem::paintStatusOverlay(QPainter* painter) const
     painter->setFont(font);
     painter->setPen(Qt::white);
     painter->drawText(QRectF(-38, 29, 76, 10), Qt::AlignCenter,
-                      QStringLiteral("%1星 血%2 攻%3")
-                          .arg(m_unit->starLevel())
-                          .arg(m_unit->hp())
-                          .arg(m_unit->atk()));
+                      QStringLiteral("%1星 血%2 攻%3").arg(m_unit->starLevel()).arg(m_unit->hp()).arg(m_unit->atk()));
 }
 
 void UnitItem::ensureAnimationLoaded()
@@ -128,11 +113,8 @@ void UnitItem::ensureAnimationLoaded()
     }
 
     const QString relativeDir = animationRelativeDirForUnit();
-    const QString animationKey = m_unit->name()
-        + QStringLiteral("|")
-        + QString::number(static_cast<int>(m_unit->state()))
-        + QStringLiteral("|")
-        + relativeDir;
+    const QString animationKey = m_unit->name() + QStringLiteral("|") +
+                                 QString::number(static_cast<int>(m_unit->state())) + QStringLiteral("|") + relativeDir;
     if (m_loadedAnimationKey == animationKey) {
         return;
     }
@@ -142,12 +124,17 @@ void UnitItem::ensureAnimationLoaded()
     m_animationFrameIndex = 0;
     m_deathAnimationFinished = false;
 
-    const QString appDir = QCoreApplication::applicationDirPath();
-    const QString roots[] = {
-        QFileInfo(appDir + "/..").canonicalFilePath(),
-        QFileInfo(appDir + "/../..").canonicalFilePath()
-    };
+    static QHash<QString, QVector<QPixmap>> frameCache;
+    if (frameCache.contains(animationKey)) {
+        m_animationFrames = frameCache.value(animationKey);
+        return;
+    }
 
+    const QString appDir = QCoreApplication::applicationDirPath();
+    const QString roots[] = {QFileInfo(appDir + "/..").canonicalFilePath(),
+                             QFileInfo(appDir + "/../..").canonicalFilePath()};
+
+    QVector<QPixmap> loadedFrames;
     auto loadSequence = [&](const QString& dirRelativePath) {
         if (dirRelativePath.isEmpty()) {
             return;
@@ -163,28 +150,25 @@ void UnitItem::ensureAnimationLoaded()
                 continue;
             }
 
-            const QStringList files = dir.entryList(QStringList() << QStringLiteral("*.png"),
-                                                    QDir::Files,
-                                                    QDir::Name);
+            const QStringList files = dir.entryList(QStringList() << QStringLiteral("*.png"), QDir::Files, QDir::Name);
             for (const QString& fileName : files) {
                 QPixmap pix;
                 pix.load(dir.filePath(fileName));
                 if (!pix.isNull()) {
-                    m_animationFrames.append(pix.scaled(80,
-                                                        80,
-                                                        Qt::KeepAspectRatio,
-                                                        Qt::SmoothTransformation));
+                    loadedFrames.append(pix.scaled(80, 80, Qt::KeepAspectRatio, Qt::SmoothTransformation));
                 }
             }
 
-            if (!m_animationFrames.isEmpty()) {
+            if (!loadedFrames.isEmpty()) {
                 return;
             }
         }
     };
 
     loadSequence(relativeDir);
-    if (!m_animationFrames.isEmpty()) {
+    if (!loadedFrames.isEmpty()) {
+        frameCache.insert(animationKey, loadedFrames);
+        m_animationFrames = loadedFrames;
         return;
     }
 
@@ -201,13 +185,14 @@ void UnitItem::ensureAnimationLoaded()
         QPixmap pix;
         pix.load(root + "/" + idleFramePath);
         if (!pix.isNull()) {
-            m_animationFrames.append(pix.scaled(80,
-                                                80,
-                                                Qt::KeepAspectRatio,
-                                                Qt::SmoothTransformation));
+            loadedFrames.append(pix.scaled(80, 80, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+            frameCache.insert(animationKey, loadedFrames);
+            m_animationFrames = loadedFrames;
             return;
         }
     }
+
+    frameCache.insert(animationKey, loadedFrames);
 }
 
 QString UnitItem::animationRelativeDirForUnit() const
@@ -217,20 +202,13 @@ QString UnitItem::animationRelativeDirForUnit() const
     }
 
     const QString name = m_unit->name();
-    const bool reaper = name == QStringLiteral("战士")
-        || name == QStringLiteral("Warrior")
-        || name == QStringLiteral("法师")
-        || name == QStringLiteral("Mage")
-        || name == QStringLiteral("敌方战士")
-        || name == QStringLiteral("Enemy Warrior");
-    const bool satyr = name == QStringLiteral("弓手")
-        || name == QStringLiteral("Archer")
-        || name == QStringLiteral("预备兵")
-        || name == QStringLiteral("Reserve")
-        || name == QStringLiteral("守卫")
-        || name == QStringLiteral("Guard")
-        || name == QStringLiteral("敌方弓手")
-        || name == QStringLiteral("Enemy Archer");
+    const bool reaper = name == QStringLiteral("战士") || name == QStringLiteral("Warrior") ||
+                        name == QStringLiteral("法师") || name == QStringLiteral("Mage") ||
+                        name == QStringLiteral("敌方战士") || name == QStringLiteral("Enemy Warrior");
+    const bool satyr = name == QStringLiteral("弓手") || name == QStringLiteral("Archer") ||
+                       name == QStringLiteral("预备兵") || name == QStringLiteral("Reserve") ||
+                       name == QStringLiteral("守卫") || name == QStringLiteral("Guard") ||
+                       name == QStringLiteral("敌方弓手") || name == QStringLiteral("Enemy Archer");
 
     QString variant;
     if (name == QStringLiteral("战士") || name == QStringLiteral("Warrior")) {
@@ -243,10 +221,8 @@ QString UnitItem::animationRelativeDirForUnit() const
         variant = QStringLiteral("Satyr_01");
     } else if (name == QStringLiteral("预备兵") || name == QStringLiteral("Reserve")) {
         variant = QStringLiteral("Satyr_02");
-    } else if (name == QStringLiteral("守卫")
-               || name == QStringLiteral("Guard")
-               || name == QStringLiteral("敌方弓手")
-               || name == QStringLiteral("Enemy Archer")) {
+    } else if (name == QStringLiteral("守卫") || name == QStringLiteral("Guard") ||
+               name == QStringLiteral("敌方弓手") || name == QStringLiteral("Enemy Archer")) {
         variant = QStringLiteral("Satyr_03");
     }
 
@@ -289,25 +265,32 @@ QString UnitItem::idleFrameRelativePathForUnit() const
 
     const QString name = m_unit->name();
     if (name == QStringLiteral("战士") || name == QStringLiteral("Warrior")) {
-        return QStringLiteral("assets/craftpix-reaper-man-chibi-2d-game-sprites/Reaper_Man_1/PNG/PNG Sequences/Idle/0_Reaper_Man_Idle_000.png");
+        return QStringLiteral("assets/craftpix-reaper-man-chibi-2d-game-sprites/Reaper_Man_1/PNG/PNG "
+                              "Sequences/Idle/0_Reaper_Man_Idle_000.png");
     }
     if (name == QStringLiteral("弓手") || name == QStringLiteral("Archer")) {
-        return QStringLiteral("assets/craftpix-satyr-tiny-style-2d-sprites/PNG/Satyr_01/PNG Sequences/Idle/Satyr_01_Idle_000.png");
+        return QStringLiteral(
+            "assets/craftpix-satyr-tiny-style-2d-sprites/PNG/Satyr_01/PNG Sequences/Idle/Satyr_01_Idle_000.png");
     }
     if (name == QStringLiteral("法师") || name == QStringLiteral("Mage")) {
-        return QStringLiteral("assets/craftpix-reaper-man-chibi-2d-game-sprites/Reaper_Man_2/PNG/PNG Sequences/Idle/0_Reaper_Man_Idle_000.png");
+        return QStringLiteral("assets/craftpix-reaper-man-chibi-2d-game-sprites/Reaper_Man_2/PNG/PNG "
+                              "Sequences/Idle/0_Reaper_Man_Idle_000.png");
     }
     if (name == QStringLiteral("预备兵") || name == QStringLiteral("Reserve")) {
-        return QStringLiteral("assets/craftpix-satyr-tiny-style-2d-sprites/PNG/Satyr_02/PNG Sequences/Idle/Satyr_02_Idle_000.png");
+        return QStringLiteral(
+            "assets/craftpix-satyr-tiny-style-2d-sprites/PNG/Satyr_02/PNG Sequences/Idle/Satyr_02_Idle_000.png");
     }
     if (name == QStringLiteral("守卫") || name == QStringLiteral("Guard")) {
-        return QStringLiteral("assets/craftpix-satyr-tiny-style-2d-sprites/PNG/Satyr_03/PNG Sequences/Idle/Satyr_03_Idle_000.png");
+        return QStringLiteral(
+            "assets/craftpix-satyr-tiny-style-2d-sprites/PNG/Satyr_03/PNG Sequences/Idle/Satyr_03_Idle_000.png");
     }
     if (name == QStringLiteral("敌方战士") || name == QStringLiteral("Enemy Warrior")) {
-        return QStringLiteral("assets/craftpix-reaper-man-chibi-2d-game-sprites/Reaper_Man_3/PNG/PNG Sequences/Idle/0_Reaper_Man_Idle_000.png");
+        return QStringLiteral("assets/craftpix-reaper-man-chibi-2d-game-sprites/Reaper_Man_3/PNG/PNG "
+                              "Sequences/Idle/0_Reaper_Man_Idle_000.png");
     }
     if (name == QStringLiteral("敌方弓手") || name == QStringLiteral("Enemy Archer")) {
-        return QStringLiteral("assets/craftpix-satyr-tiny-style-2d-sprites/PNG/Satyr_03/PNG Sequences/Idle/Satyr_03_Idle_000.png");
+        return QStringLiteral(
+            "assets/craftpix-satyr-tiny-style-2d-sprites/PNG/Satyr_03/PNG Sequences/Idle/Satyr_03_Idle_000.png");
     }
 
     return QString();

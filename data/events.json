@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "events": [
+    {
+      "key": "elite",
+      "description": "精英来袭：本轮敌人属性提升。",
+      "every": 5,
+      "priority": 20,
+      "goldBonus": 0
+    },
+    {
+      "key": "harvest",
+      "description": "丰收回合：准备阶段额外获得3金币。",
+      "every": 3,
+      "priority": 10,
+      "goldBonus": 3
+    }
+  ]
+}

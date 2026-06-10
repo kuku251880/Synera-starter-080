@@ -2,12 +2,18 @@
 #include "entity/unit.h"
 #include "gui/griditem.h"
 #include "gui/unititem.h"
+#include <QBuffer>
+#include <QCoreApplication>
 #include <QDateTime>
 #include <QFile>
+#include <QFileDevice>
 #include <QFileInfo>
 #include <QGraphicsRectItem>
 #include <QGraphicsScene>
 #include <QGraphicsTextItem>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QRandomGenerator>
 #include <QTextStream>
 #include <QTimer>
@@ -22,39 +28,579 @@ namespace {
 constexpr qreal kZGrid = 0.0;
 constexpr qreal kZUnit = 1.0;
 constexpr qreal kZDraggingUnit = 2.0;
+constexpr int kCurrentSaveVersion = 2;
 
 std::runtime_error makeRuntimeError(const QString& message)
 {
     return std::runtime_error(message.toUtf8().constData());
 }
+
+QJsonArray stringListToJsonArray(const QStringList& values)
+{
+    QJsonArray array;
+    for (const QString& value : values) {
+        array.append(value);
+    }
+    return array;
+}
+
+QJsonArray stringVectorToJsonArray(const QVector<QString>& values)
+{
+    QJsonArray array;
+    for (const QString& value : values) {
+        array.append(value);
+    }
+    return array;
+}
+
+QStringList jsonArrayToStringList(const QJsonArray& array)
+{
+    QStringList values;
+    for (const QJsonValue& value : array) {
+        const QString text = value.toString();
+        if (!text.isEmpty()) {
+            values.append(text);
+        }
+    }
+    return values;
+}
+
+QJsonObject migrateSaveObject(QJsonObject saveObject)
+{
+    const int version = saveObject.value(QStringLiteral("version")).toInt(1);
+    if (version < 2) {
+        if (!saveObject.contains(QStringLiteral("shop"))) {
+            saveObject.insert(QStringLiteral("shop"), QJsonArray());
+        }
+        if (!saveObject.contains(QStringLiteral("equipment"))) {
+            saveObject.insert(QStringLiteral("equipment"), QJsonArray());
+        }
+        if (!saveObject.contains(QStringLiteral("achievements"))) {
+            saveObject.insert(QStringLiteral("achievements"), QJsonArray());
+        }
+        if (!saveObject.contains(QStringLiteral("units"))) {
+            saveObject.insert(QStringLiteral("units"), QJsonArray());
+        }
+    }
+
+    saveObject.insert(QStringLiteral("version"), kCurrentSaveVersion);
+    return saveObject;
+}
+
+QString skillTypeKey(SkillType type)
+{
+    switch (type) {
+    case SkillType::PowerStrike:
+        return QStringLiteral("PowerStrike");
+    case SkillType::SelfHeal:
+        return QStringLiteral("SelfHeal");
+    case SkillType::ArcaneBurst:
+        return QStringLiteral("ArcaneBurst");
+    }
+    return QStringLiteral("PowerStrike");
+}
+
+SkillType skillTypeFromKey(const QString& key, SkillType fallback)
+{
+    if (key == QStringLiteral("PowerStrike")) {
+        return SkillType::PowerStrike;
+    }
+    if (key == QStringLiteral("SelfHeal")) {
+        return SkillType::SelfHeal;
+    }
+    if (key == QStringLiteral("ArcaneBurst")) {
+        return SkillType::ArcaneBurst;
+    }
+    return fallback;
+}
+
+struct UnitTemplate
+{
+    QString name;
+    QStringList aliases;
+    int hp;
+    int atk;
+    int range;
+    int maxMana;
+    QStringList traits;
+    SkillType skillType;
+    bool shopAvailable;
+};
+
+struct TraitThreshold
+{
+    int count;
+    QString description;
+    int teamAtkBonus;
+    int traitMaxHpBonus;
+    int traitRangeBonus;
+    int traitMaxManaBonus;
+    int traitManaGainBonus;
+    int traitSkillAmpPercent;
+    int traitExtraStrikeChance;
+};
+
+struct TraitRule
+{
+    QString name;
+    QVector<TraitThreshold> thresholds;
+};
+
+struct ActiveTraitBonus
+{
+    QString name;
+    int count;
+    TraitThreshold threshold;
+};
+
+struct RoundEvent
+{
+    QString key;
+    QString description;
+    int every;
+    int priority;
+    int goldBonus;
+};
+
+struct EnemyRoundTemplate
+{
+    QString name;
+    int baseMaxHp;
+    int baseAtk;
+    int hpGrowth;
+    int atkGrowth;
+    int eliteMaxHpBonus;
+    int eliteAtkBonus;
+};
+
+QVector<UnitTemplate> defaultUnitTemplates()
+{
+    return {
+        {QStringLiteral("战士"),
+         {QStringLiteral("Warrior")},
+         120,
+         14,
+         1,
+         80,
+         {QStringLiteral("前排"), QStringLiteral("人类")},
+         SkillType::PowerStrike,
+         true},
+        {QStringLiteral("弓手"),
+         {QStringLiteral("Archer")},
+         80,
+         18,
+         3,
+         60,
+         {QStringLiteral("游侠"), QStringLiteral("人类")},
+         SkillType::PowerStrike,
+         true},
+        {QStringLiteral("法师"),
+         {QStringLiteral("Mage")},
+         70,
+         22,
+         3,
+         100,
+         {QStringLiteral("奥术"), QStringLiteral("人类")},
+         SkillType::ArcaneBurst,
+         true},
+        {QStringLiteral("预备兵"),
+         {QStringLiteral("Reserve")},
+         95,
+         12,
+         1,
+         70,
+         {QStringLiteral("前排"), QStringLiteral("游侠")},
+         SkillType::SelfHeal,
+         true},
+        {QStringLiteral("守卫"),
+         {QStringLiteral("Guard")},
+         140,
+         10,
+         1,
+         90,
+         {QStringLiteral("前排"), QStringLiteral("奥术")},
+         SkillType::SelfHeal,
+         true},
+        {QStringLiteral("敌方战士"),
+         {QStringLiteral("Enemy Warrior")},
+         120,
+         15,
+         1,
+         80,
+         {QStringLiteral("前排"), QStringLiteral("敌人")},
+         SkillType::PowerStrike,
+         false},
+        {QStringLiteral("敌方弓手"),
+         {QStringLiteral("Enemy Archer")},
+         85,
+         18,
+         3,
+         60,
+         {QStringLiteral("游侠"), QStringLiteral("敌人")},
+         SkillType::ArcaneBurst,
+         false},
+    };
+}
+
+QString projectRelativeFilePath(const QString& relativePath)
+{
+    const QString appDir = QCoreApplication::applicationDirPath();
+    const QString roots[] = {
+        appDir,
+        QFileInfo(appDir + QStringLiteral("/..")).canonicalFilePath(),
+        QFileInfo(appDir + QStringLiteral("/../..")).canonicalFilePath(),
+    };
+
+    for (const QString& root : roots) {
+        if (root.isEmpty()) {
+            continue;
+        }
+
+        const QFileInfo candidate(root + QStringLiteral("/") + relativePath);
+        if (candidate.exists()) {
+            return candidate.canonicalFilePath();
+        }
+    }
+    return QString();
+}
+
+QVector<UnitTemplate> loadUnitTemplates()
+{
+    const QString path = projectRelativeFilePath(QStringLiteral("data/units.json"));
+    if (path.isEmpty()) {
+        return defaultUnitTemplates();
+    }
+
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) {
+        return defaultUnitTemplates();
+    }
+
+    QJsonParseError parseError;
+    const QJsonDocument document = QJsonDocument::fromJson(file.readAll(), &parseError);
+    if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
+        return defaultUnitTemplates();
+    }
+
+    QVector<UnitTemplate> templates;
+    const QJsonArray units = document.object().value(QStringLiteral("units")).toArray();
+    for (const QJsonValue& value : units) {
+        const QJsonObject object = value.toObject();
+        const QString name = object.value(QStringLiteral("name")).toString();
+        if (name.isEmpty()) {
+            continue;
+        }
+
+        UnitTemplate unitTemplate;
+        unitTemplate.name = name;
+        unitTemplate.aliases = jsonArrayToStringList(object.value(QStringLiteral("aliases")).toArray());
+        unitTemplate.hp = object.value(QStringLiteral("hp")).toInt(100);
+        unitTemplate.atk = object.value(QStringLiteral("atk")).toInt(10);
+        unitTemplate.range = object.value(QStringLiteral("range")).toInt(1);
+        unitTemplate.maxMana = object.value(QStringLiteral("maxMana")).toInt(100);
+        unitTemplate.traits = jsonArrayToStringList(object.value(QStringLiteral("traits")).toArray());
+        unitTemplate.skillType =
+            skillTypeFromKey(object.value(QStringLiteral("skillType")).toString(), SkillType::PowerStrike);
+        unitTemplate.shopAvailable = object.value(QStringLiteral("shopAvailable")).toBool(true);
+        templates.append(unitTemplate);
+    }
+
+    return templates.isEmpty() ? defaultUnitTemplates() : templates;
+}
+
+const QVector<UnitTemplate>& unitTemplates()
+{
+    static const QVector<UnitTemplate> templates = loadUnitTemplates();
+    return templates;
+}
+
+QVector<TraitRule> defaultTraitRules()
+{
+    return {
+        {QStringLiteral("人类"),
+         {{2, QStringLiteral("全队攻击+10"), 10, 0, 0, 0, 0, 0, 0},
+          {4, QStringLiteral("全队攻击+25"), 25, 0, 0, 0, 0, 0, 0}}},
+        {QStringLiteral("前排"),
+         {{2, QStringLiteral("前排生命+120"), 0, 120, 0, 0, 0, 0, 0},
+          {3, QStringLiteral("前排生命+240"), 0, 240, 0, 0, 0, 0, 0}}},
+        {QStringLiteral("游侠"), {{2, QStringLiteral("普攻35%连击"), 0, 0, 0, 0, 0, 0, 35}}},
+        {QStringLiteral("奥术"), {{2, QStringLiteral("技能+25%，法力更快"), 0, 0, 0, -10, 10, 25, 0}}},
+    };
+}
+
+QVector<TraitRule> loadTraitRules()
+{
+    const QString path = projectRelativeFilePath(QStringLiteral("data/traits.json"));
+    if (path.isEmpty()) {
+        return defaultTraitRules();
+    }
+
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) {
+        return defaultTraitRules();
+    }
+
+    QJsonParseError parseError;
+    const QJsonDocument document = QJsonDocument::fromJson(file.readAll(), &parseError);
+    if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
+        return defaultTraitRules();
+    }
+
+    QVector<TraitRule> rules;
+    const QJsonArray traitArray = document.object().value(QStringLiteral("traits")).toArray();
+    for (const QJsonValue& traitValue : traitArray) {
+        const QJsonObject traitObject = traitValue.toObject();
+        TraitRule rule;
+        rule.name = traitObject.value(QStringLiteral("name")).toString();
+        if (rule.name.isEmpty()) {
+            continue;
+        }
+
+        const QJsonArray thresholdArray = traitObject.value(QStringLiteral("thresholds")).toArray();
+        for (const QJsonValue& thresholdValue : thresholdArray) {
+            const QJsonObject thresholdObject = thresholdValue.toObject();
+            TraitThreshold threshold;
+            threshold.count = thresholdObject.value(QStringLiteral("count")).toInt(0);
+            threshold.description = thresholdObject.value(QStringLiteral("description")).toString();
+            threshold.teamAtkBonus = thresholdObject.value(QStringLiteral("teamAtkBonus")).toInt(0);
+            threshold.traitMaxHpBonus = thresholdObject.value(QStringLiteral("traitMaxHpBonus")).toInt(0);
+            threshold.traitRangeBonus = thresholdObject.value(QStringLiteral("traitRangeBonus")).toInt(0);
+            threshold.traitMaxManaBonus = thresholdObject.value(QStringLiteral("traitMaxManaBonus")).toInt(0);
+            threshold.traitManaGainBonus = thresholdObject.value(QStringLiteral("traitManaGainBonus")).toInt(0);
+            threshold.traitSkillAmpPercent = thresholdObject.value(QStringLiteral("traitSkillAmpPercent")).toInt(0);
+            threshold.traitExtraStrikeChance = thresholdObject.value(QStringLiteral("traitExtraStrikeChance")).toInt(0);
+            if (threshold.count > 0) {
+                rule.thresholds.append(threshold);
+            }
+        }
+
+        if (!rule.thresholds.isEmpty()) {
+            std::sort(rule.thresholds.begin(), rule.thresholds.end(),
+                      [](const TraitThreshold& a, const TraitThreshold& b) { return a.count < b.count; });
+            rules.append(rule);
+        }
+    }
+
+    return rules.isEmpty() ? defaultTraitRules() : rules;
+}
+
+const QVector<TraitRule>& traitRules()
+{
+    static const QVector<TraitRule> rules = loadTraitRules();
+    return rules;
+}
+
+QVector<ActiveTraitBonus> activeTraitBonuses(const QHash<QString, int>& counts)
+{
+    QVector<ActiveTraitBonus> active;
+    for (const TraitRule& rule : traitRules()) {
+        const int count = counts.value(rule.name);
+        const TraitThreshold* selected = nullptr;
+        for (const TraitThreshold& threshold : rule.thresholds) {
+            if (count >= threshold.count) {
+                selected = &threshold;
+            }
+        }
+        if (selected) {
+            active.append({rule.name, count, *selected});
+        }
+    }
+    return active;
+}
+
+QVector<RoundEvent> defaultRoundEvents()
+{
+    return {
+        {QStringLiteral("elite"), QStringLiteral("精英来袭：本轮敌人属性提升。"), 5, 20, 0},
+        {QStringLiteral("harvest"), QStringLiteral("丰收回合：准备阶段额外获得3金币。"), 3, 10, 3},
+    };
+}
+
+QVector<RoundEvent> loadRoundEvents()
+{
+    const QString path = projectRelativeFilePath(QStringLiteral("data/events.json"));
+    if (path.isEmpty()) {
+        return defaultRoundEvents();
+    }
+
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) {
+        return defaultRoundEvents();
+    }
+
+    QJsonParseError parseError;
+    const QJsonDocument document = QJsonDocument::fromJson(file.readAll(), &parseError);
+    if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
+        return defaultRoundEvents();
+    }
+
+    QVector<RoundEvent> events;
+    const QJsonArray eventArray = document.object().value(QStringLiteral("events")).toArray();
+    for (const QJsonValue& value : eventArray) {
+        const QJsonObject object = value.toObject();
+        RoundEvent event;
+        event.key = object.value(QStringLiteral("key")).toString();
+        event.description = object.value(QStringLiteral("description")).toString();
+        event.every = object.value(QStringLiteral("every")).toInt(0);
+        event.priority = object.value(QStringLiteral("priority")).toInt(0);
+        event.goldBonus = object.value(QStringLiteral("goldBonus")).toInt(0);
+        if (!event.key.isEmpty() && !event.description.isEmpty() && event.every > 0) {
+            events.append(event);
+        }
+    }
+    return events.isEmpty() ? defaultRoundEvents() : events;
+}
+
+const QVector<RoundEvent>& roundEvents()
+{
+    static const QVector<RoundEvent> events = loadRoundEvents();
+    return events;
+}
+
+RoundEvent roundEventForRound(int round)
+{
+    RoundEvent selected;
+    selected.key = QStringLiteral("none");
+    selected.description = QStringLiteral("无");
+    selected.every = 0;
+    selected.priority = -1;
+    selected.goldBonus = 0;
+
+    if (round <= 0) {
+        return selected;
+    }
+
+    for (const RoundEvent& event : roundEvents()) {
+        if (event.every <= 0 || round % event.every != 0 || event.priority < selected.priority) {
+            continue;
+        }
+        selected = event;
+    }
+    return selected;
+}
+
+QVector<EnemyRoundTemplate> defaultEnemyRoundTemplates()
+{
+    return {
+        {QStringLiteral("敌方战士"), 120, 15, 20, 2, 80, 5},
+        {QStringLiteral("敌方弓手"), 85, 18, 20, 2, 60, 5},
+    };
+}
+
+QVector<EnemyRoundTemplate> loadEnemyRoundTemplates()
+{
+    const QString path = projectRelativeFilePath(QStringLiteral("data/enemy_waves.json"));
+    if (path.isEmpty()) {
+        return defaultEnemyRoundTemplates();
+    }
+
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) {
+        return defaultEnemyRoundTemplates();
+    }
+
+    QJsonParseError parseError;
+    const QJsonDocument document = QJsonDocument::fromJson(file.readAll(), &parseError);
+    if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
+        return defaultEnemyRoundTemplates();
+    }
+
+    QVector<EnemyRoundTemplate> enemies;
+    const QJsonArray enemyArray = document.object().value(QStringLiteral("enemies")).toArray();
+    for (const QJsonValue& value : enemyArray) {
+        const QJsonObject object = value.toObject();
+        EnemyRoundTemplate enemy;
+        enemy.name = object.value(QStringLiteral("name")).toString();
+        enemy.baseMaxHp = object.value(QStringLiteral("baseMaxHp")).toInt(100);
+        enemy.baseAtk = object.value(QStringLiteral("baseAtk")).toInt(10);
+        enemy.hpGrowth = object.value(QStringLiteral("hpGrowth")).toInt(0);
+        enemy.atkGrowth = object.value(QStringLiteral("atkGrowth")).toInt(0);
+        enemy.eliteMaxHpBonus = object.value(QStringLiteral("eliteMaxHpBonus")).toInt(0);
+        enemy.eliteAtkBonus = object.value(QStringLiteral("eliteAtkBonus")).toInt(0);
+        if (!enemy.name.isEmpty()) {
+            enemies.append(enemy);
+        }
+    }
+    return enemies.isEmpty() ? defaultEnemyRoundTemplates() : enemies;
+}
+
+const QVector<EnemyRoundTemplate>& enemyRoundTemplates()
+{
+    static const QVector<EnemyRoundTemplate> enemies = loadEnemyRoundTemplates();
+    return enemies;
+}
+
+LogCategory inferLogCategory(const QString& message)
+{
+    if (message.contains(QStringLiteral("保存")) || message.contains(QStringLiteral("读取"))) {
+        return LogCategory::SaveLoad;
+    }
+    if (message.contains(QStringLiteral("释放"))) {
+        return LogCategory::Skill;
+    }
+    if (message.contains(QStringLiteral("攻击")) || message.contains(QStringLiteral("伤害")) ||
+        message.contains(QStringLiteral("阵亡")) || message.contains(QStringLiteral("胜利")) ||
+        message.contains(QStringLiteral("失败"))) {
+        return LogCategory::Combat;
+    }
+    if (message.contains(QStringLiteral("金币")) || message.contains(QStringLiteral("购买")) ||
+        message.contains(QStringLiteral("刷新商店")) || message.contains(QStringLiteral("升级"))) {
+        return LogCategory::Economy;
+    }
+    if (message.contains(QStringLiteral("羁绊")) || message.contains(QStringLiteral("成就"))) {
+        return LogCategory::Trait;
+    }
+    return LogCategory::System;
+}
+
+QString logCategoryText(LogCategory category)
+{
+    switch (category) {
+    case LogCategory::System:
+        return QStringLiteral("系统");
+    case LogCategory::Combat:
+        return QStringLiteral("战斗");
+    case LogCategory::Skill:
+        return QStringLiteral("技能");
+    case LogCategory::Economy:
+        return QStringLiteral("经济");
+    case LogCategory::SaveLoad:
+        return QStringLiteral("存档");
+    case LogCategory::Trait:
+        return QStringLiteral("羁绊");
+    }
+    return QStringLiteral("系统");
+}
+
+QString logCategoryColor(LogCategory category)
+{
+    switch (category) {
+    case LogCategory::System:
+        return QStringLiteral("#9fa6b2");
+    case LogCategory::Combat:
+        return QStringLiteral("#f08c74");
+    case LogCategory::Skill:
+        return QStringLiteral("#a78bfa");
+    case LogCategory::Economy:
+        return QStringLiteral("#ffd36a");
+    case LogCategory::SaveLoad:
+        return QStringLiteral("#58c28d");
+    case LogCategory::Trait:
+        return QStringLiteral("#64d2ff");
+    }
+    return QStringLiteral("#9fa6b2");
+}
 } // namespace
 
 Game::Game(QObject* parent)
-    : QObject(parent)
-    , m_benchSlots(8, nullptr)
-    , m_shopSlots(5)
-    , m_scene(new QGraphicsScene(this))
-    , m_leftInfoPanel(nullptr)
-    , m_infoPanel(nullptr)
-    , m_combatTimer(new QTimer(this))
-    , m_dragActive(false)
-    , m_activeUnitId(-1)
-    , m_selectedUnitId(-1)
-    , m_sourceGrid(-1, -1)
-    , m_phase(GamePhase::Prepare)
-    , m_lastResult(QStringLiteral("请布置你的阵容。"))
-    , m_currentEvent(QStringLiteral("无"))
-    , m_eventRewardRound(0)
-    , m_rows(Board::ROWS)
-    , m_cols(Board::COLS)
-    , m_benchSlotCount(8)
-    , m_cellSize(64.0)
-    , m_cellGap(4.0)
-    , m_benchGap(52.0)
+    : QObject(parent), m_benchSlots(8, nullptr), m_shopSlots(5), m_scene(new QGraphicsScene(this)),
+      m_leftInfoPanel(nullptr), m_infoPanel(nullptr), m_combatTimer(new QTimer(this)), m_dragActive(false),
+      m_activeUnitId(-1), m_selectedUnitId(-1), m_sourceGrid(-1, -1), m_phase(GamePhase::Prepare),
+      m_lastResult(QStringLiteral("请布置你的阵容。")), m_currentEvent(QStringLiteral("无")), m_eventRewardRound(0),
+      m_rows(Board::ROWS), m_cols(Board::COLS), m_benchSlotCount(8), m_cellSize(64.0), m_cellGap(4.0), m_benchGap(52.0)
 {
     m_combatTimer->setInterval(300);
-    connect(m_combatTimer, &QTimer::timeout,
-            this, &Game::updateCombat);
+    connect(m_combatTimer, &QTimer::timeout, this, &Game::updateCombat);
 }
 
 Game::~Game()
@@ -114,7 +660,8 @@ void Game::startCombat()
             continue;
         }
 
-        if (unit->isAlive() && m_board.isValidPosition(unit->position()) && m_board.getUnitAt(unit->position()) == unit) {
+        if (unit->isAlive() && m_board.isValidPosition(unit->position()) &&
+            m_board.getUnitAt(unit->position()) == unit) {
             unit->resetCombatState();
         }
     }
@@ -130,15 +677,8 @@ void Game::setupRoundBoard()
     updateRoundEvent();
     generateEnemyRound(m_player.currentRound());
 
-    const QPoint playerPositions[] = {
-        QPoint(0, 7),
-        QPoint(1, 7),
-        QPoint(2, 7)
-    };
-    const QPoint enemyPositions[] = {
-        QPoint(5, 0),
-        QPoint(6, 0)
-    };
+    const QPoint playerPositions[] = {QPoint(0, 7), QPoint(1, 7), QPoint(2, 7)};
+    const QPoint enemyPositions[] = {QPoint(5, 0), QPoint(6, 0)};
 
     int deployedPlayers = 0;
     int benchSlot = 0;
@@ -376,56 +916,76 @@ void Game::saveGame(int slot)
     try {
         const int normalizedSlot = qBound(1, slot, 3);
         QFile file(saveFileName(normalizedSlot));
-        if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
             throw makeRuntimeError(QStringLiteral("无法打开存档文件。"));
         }
 
-        QTextStream out(&file);
-        out << "PLAYER " << m_player.hp() << ' ' << m_player.gold() << ' ' << m_player.level() << ' '
-            << m_player.populationLimit() << ' ' << m_player.currentRound() << ' ' << m_player.winStreak() << ' '
-            << m_player.lossStreak() << '\n';
+        QJsonObject root;
+        root.insert(QStringLiteral("format"), QStringLiteral("SyneraSave"));
+        root.insert(QStringLiteral("version"), kCurrentSaveVersion);
+        root.insert(QStringLiteral("savedAt"), QDateTime::currentDateTime().toString(Qt::ISODate));
 
-        out << "SHOP";
-        for (const QString& slot : m_shopSlots) {
-            out << '|' << slot;
-        }
-        out << '\n';
+        QJsonObject playerObject;
+        playerObject.insert(QStringLiteral("hp"), m_player.hp());
+        playerObject.insert(QStringLiteral("gold"), m_player.gold());
+        playerObject.insert(QStringLiteral("level"), m_player.level());
+        playerObject.insert(QStringLiteral("populationLimit"), m_player.populationLimit());
+        playerObject.insert(QStringLiteral("currentRound"), m_player.currentRound());
+        playerObject.insert(QStringLiteral("winStreak"), m_player.winStreak());
+        playerObject.insert(QStringLiteral("lossStreak"), m_player.lossStreak());
+        root.insert(QStringLiteral("player"), playerObject);
 
-        out << "EQUIPMENT";
+        root.insert(QStringLiteral("shop"), stringVectorToJsonArray(m_shopSlots));
+
+        QJsonArray equipmentArray;
         for (const Equipment& equipment : m_equipmentPool) {
-            out << '|' << equipment.name();
+            equipmentArray.append(equipment.name());
         }
-        out << '\n';
+        root.insert(QStringLiteral("equipment"), equipmentArray);
+        root.insert(QStringLiteral("achievements"), stringListToJsonArray(m_achievements));
 
-        out << "ACHIEVEMENTS";
-        for (const QString& achievement : m_achievements) {
-            out << '|' << achievement;
-        }
-        out << '\n';
-
+        QJsonArray unitArray;
         for (Unit* unit : m_units) {
             if (!unit || unit->owner() == UnitOwner::EnemyCtrl) {
                 continue;
             }
 
-            QString location = QStringLiteral("HIDDEN");
+            QJsonObject unitObject;
+            unitObject.insert(QStringLiteral("name"), unit->name());
+            unitObject.insert(QStringLiteral("starLevel"), unit->starLevel());
+            unitObject.insert(QStringLiteral("hp"), qMin(unit->hp(), unit->baseMaxHp()));
+            unitObject.insert(QStringLiteral("maxHp"), unit->baseMaxHp());
+            unitObject.insert(QStringLiteral("atk"), unit->baseAtk());
+            unitObject.insert(QStringLiteral("range"), unit->baseRange());
+            unitObject.insert(QStringLiteral("maxMana"), unit->baseMaxMana());
+            unitObject.insert(QStringLiteral("mana"), qMin(unit->mana(), unit->baseMaxMana()));
+            unitObject.insert(QStringLiteral("attackInterval"), unit->attackInterval());
+            unitObject.insert(QStringLiteral("skillType"), skillTypeKey(unit->skillType()));
+            unitObject.insert(QStringLiteral("traits"), stringListToJsonArray(unit->traits()));
+            unitObject.insert(QStringLiteral("equipmentNames"), stringListToJsonArray(unit->equipmentNames()));
+
+            QJsonObject locationObject;
+            locationObject.insert(QStringLiteral("type"), QStringLiteral("hidden"));
             QPoint pos = unit->position();
             if (m_board.isValidPosition(pos) && m_board.getUnitAt(pos) == unit) {
-                location = QStringLiteral("BOARD:%1:%2").arg(pos.x()).arg(pos.y());
+                locationObject.insert(QStringLiteral("type"), QStringLiteral("board"));
+                locationObject.insert(QStringLiteral("x"), pos.x());
+                locationObject.insert(QStringLiteral("y"), pos.y());
             } else {
                 const int benchSlot = benchIndexOf(unit);
                 if (benchSlot >= 0) {
-                    location = QStringLiteral("BENCH:%1").arg(benchSlot);
+                    locationObject.insert(QStringLiteral("type"), QStringLiteral("bench"));
+                    locationObject.insert(QStringLiteral("slot"), benchSlot);
                 }
             }
+            unitObject.insert(QStringLiteral("location"), locationObject);
 
-            out << "UNIT|" << unit->name() << '|' << unit->starLevel() << '|' << qMin(unit->hp(), unit->baseMaxHp())
-                << '|' << unit->baseMaxHp() << '|' << unit->baseAtk() << '|' << unit->baseRange() << '|'
-                << unit->baseMaxMana() << '|' << qMin(unit->mana(), unit->baseMaxMana()) << '|' << location << '\n';
+            unitArray.append(unitObject);
         }
+        root.insert(QStringLiteral("units"), unitArray);
 
-        out.flush();
-        if (out.status() != QTextStream::Ok || !file.flush()) {
+        const QByteArray saveData = QJsonDocument(root).toJson(QJsonDocument::Indented);
+        if (file.write(saveData) != saveData.size() || !file.flush()) {
             throw makeRuntimeError(QStringLiteral("写入存档文件失败：%1").arg(file.errorString()));
         }
 
@@ -450,9 +1010,16 @@ void Game::loadGame(int slot)
 {
     try {
         const int normalizedSlot = qBound(1, slot, 3);
-        QFile file(saveFileName(normalizedSlot));
+        const QString jsonPath = saveFileName(normalizedSlot);
+        const QString selectedPath = QFile::exists(jsonPath) ? jsonPath : legacySaveFileName(normalizedSlot);
+        QFile file(selectedPath);
         if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
             throw makeRuntimeError(QStringLiteral("没有找到存档 %1。").arg(normalizedSlot));
+        }
+
+        const QByteArray saveData = file.readAll();
+        if (file.error() != QFileDevice::NoError) {
+            throw makeRuntimeError(QStringLiteral("读取存档文件失败：%1").arg(file.errorString()));
         }
 
         m_combatTimer->stop();
@@ -465,104 +1032,19 @@ void Game::loadGame(int slot)
         m_equipmentPool.clear();
         m_achievements.clear();
         m_logs.clear();
+        m_dragActive = false;
+        m_activeUnitId = -1;
+        m_selectedUnitId = -1;
         m_player.setWinStreak(0);
         m_player.setLossStreak(0);
 
-        QTextStream in(&file);
-        while (!in.atEnd()) {
-            const QString line = in.readLine();
-            if (line.startsWith(QStringLiteral("PLAYER "))) {
-                const QStringList parts = line.split(' ', Qt::SkipEmptyParts);
-                if (parts.size() >= 6) {
-                    m_player.setHp(parts.at(1).toInt());
-                    m_player.setGold(parts.at(2).toInt());
-                    m_player.setLevel(parts.at(3).toInt());
-                    m_player.setPopulationLimit(parts.at(4).toInt());
-                    m_player.setCurrentRound(parts.at(5).toInt());
-                    if (parts.size() >= 8) {
-                        m_player.setWinStreak(parts.at(6).toInt());
-                        m_player.setLossStreak(parts.at(7).toInt());
-                    }
-                }
-            } else if (line.startsWith(QStringLiteral("SHOP"))) {
-                const QStringList parts = line.split('|');
-                m_shopSlots.fill(QString(), 5);
-                for (int i = 1; i < parts.size() && i - 1 < m_shopSlots.size(); ++i) {
-                    m_shopSlots[i - 1] = parts.at(i);
-                }
-            } else if (line.startsWith(QStringLiteral("EQUIPMENT"))) {
-                const QStringList parts = line.split('|');
-                for (int i = 1; i < parts.size(); ++i) {
-                    if (!parts.at(i).isEmpty()) {
-                        m_equipmentPool.append(equipmentFromName(parts.at(i)));
-                    }
-                }
-            } else if (line.startsWith(QStringLiteral("ACHIEVEMENTS"))) {
-                const QStringList parts = line.split('|');
-                for (int i = 1; i < parts.size(); ++i) {
-                    if (!parts.at(i).isEmpty() && !m_achievements.contains(parts.at(i))) {
-                        m_achievements.append(parts.at(i));
-                    }
-                }
-            } else if (line.startsWith(QStringLiteral("UNIT|"))) {
-                const QStringList parts = line.split('|');
-                if (parts.size() < 10) {
-                    continue;
-                }
-
-                Unit* unit = createUnitFromTemplate(parts.at(1), UnitOwner::PlayerCtrl);
-                unit->setStarLevel(parts.at(2).toInt());
-                unit->setHp(parts.at(3).toInt());
-                unit->setMaxHp(parts.at(4).toInt());
-                unit->setAtk(parts.at(5).toInt());
-                unit->setRange(parts.at(6).toInt());
-                unit->setMaxMana(parts.at(7).toInt());
-                unit->setMana(parts.at(8).toInt());
-                m_units.append(unit);
-                m_player.addUnit(unit->id());
-
-                const QString location = parts.at(9);
-                if (location.startsWith(QStringLiteral("BOARD:"))) {
-                    const QStringList coords = location.split(':');
-                    if (coords.size() == 3) {
-                        m_board.addUnit(unit, QPoint(coords.at(1).toInt(), coords.at(2).toInt()));
-                    }
-                } else if (location.startsWith(QStringLiteral("BENCH:"))) {
-                    const QStringList slotParts = location.split(':');
-                    if (slotParts.size() == 2) {
-                        const int slot = slotParts.at(1).toInt();
-                        if (slot >= 0 && slot < m_benchSlots.size()) {
-                            m_benchSlots[slot] = unit;
-                            unit->setPosition(QPoint(slot, Board::ROWS));
-                        }
-                    }
-                }
-            }
+        if (saveData.trimmed().startsWith('{')) {
+            loadJsonSaveData(saveData);
+        } else {
+            loadLegacySaveData(saveData);
         }
 
-        if (in.status() != QTextStream::Ok) {
-            throw makeRuntimeError(QStringLiteral("读取存档文件失败。"));
-        }
-
-        m_eventRewardRound = m_player.currentRound();
-        m_currentEvent = currentEventForRound(m_player.currentRound());
-        generateEnemyRound(m_player.currentRound());
-        const QPoint enemyPositions[] = {QPoint(5, 0), QPoint(6, 0)};
-        int deployedEnemies = 0;
-        for (Unit* unit : m_units) {
-            if (!unit || unit->owner() != UnitOwner::EnemyCtrl || deployedEnemies >= 2) {
-                continue;
-            }
-            unit->resetCombatState();
-            m_board.addUnit(unit, enemyPositions[deployedEnemies]);
-            ++deployedEnemies;
-        }
-
-        m_lastResult = QStringLiteral("存档 %1 读取完成。").arg(normalizedSlot);
-        addLog(QStringLiteral("读取存档 %1。").arg(normalizedSlot));
-        checkAchievements();
-        buildScene();
-        syncFromBoard();
+        finalizeLoadedGame(normalizedSlot);
     } catch (const std::exception& error) {
         m_lastResult = QStringLiteral("读取存档失败：%1").arg(QString::fromUtf8(error.what()));
         updateInfoPanel();
@@ -572,16 +1054,210 @@ void Game::loadGame(int slot)
     }
 }
 
+void Game::loadJsonSaveData(const QByteArray& saveData)
+{
+    QJsonParseError parseError;
+    const QJsonDocument document = QJsonDocument::fromJson(saveData, &parseError);
+    if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
+        throw makeRuntimeError(QStringLiteral("存档 JSON 格式错误。"));
+    }
+
+    const QJsonObject root = migrateSaveObject(document.object());
+    const QJsonObject playerObject = root.value(QStringLiteral("player")).toObject();
+    m_player.setHp(playerObject.value(QStringLiteral("hp")).toInt(m_player.hp()));
+    m_player.setGold(playerObject.value(QStringLiteral("gold")).toInt(m_player.gold()));
+    m_player.setLevel(playerObject.value(QStringLiteral("level")).toInt(m_player.level()));
+    m_player.setPopulationLimit(
+        playerObject.value(QStringLiteral("populationLimit")).toInt(m_player.populationLimit()));
+    m_player.setCurrentRound(playerObject.value(QStringLiteral("currentRound")).toInt(m_player.currentRound()));
+    m_player.setWinStreak(playerObject.value(QStringLiteral("winStreak")).toInt(0));
+    m_player.setLossStreak(playerObject.value(QStringLiteral("lossStreak")).toInt(0));
+
+    m_shopSlots.fill(QString(), 5);
+    const QJsonArray shopArray = root.value(QStringLiteral("shop")).toArray();
+    for (int i = 0; i < shopArray.size() && i < m_shopSlots.size(); ++i) {
+        m_shopSlots[i] = shopArray.at(i).toString();
+    }
+
+    for (const QString& equipmentName : jsonArrayToStringList(root.value(QStringLiteral("equipment")).toArray())) {
+        m_equipmentPool.append(equipmentFromName(equipmentName));
+    }
+
+    m_achievements = jsonArrayToStringList(root.value(QStringLiteral("achievements")).toArray());
+
+    const QJsonArray unitArray = root.value(QStringLiteral("units")).toArray();
+    for (const QJsonValue& value : unitArray) {
+        if (!value.isObject()) {
+            continue;
+        }
+
+        const QJsonObject unitObject = value.toObject();
+        const QString unitName = unitObject.value(QStringLiteral("name")).toString();
+        if (unitName.isEmpty()) {
+            continue;
+        }
+
+        Unit* unit = createUnitFromTemplate(unitName, UnitOwner::PlayerCtrl);
+        unit->setSkillType(
+            skillTypeFromKey(unitObject.value(QStringLiteral("skillType")).toString(), unit->skillType()));
+        const QStringList savedTraits = jsonArrayToStringList(unitObject.value(QStringLiteral("traits")).toArray());
+        if (!savedTraits.isEmpty()) {
+            unit->setTraits(savedTraits);
+        }
+        unit->setStarLevel(unitObject.value(QStringLiteral("starLevel")).toInt(unit->starLevel()));
+        unit->setHp(unitObject.value(QStringLiteral("hp")).toInt(unit->hp()));
+        unit->setMaxHp(unitObject.value(QStringLiteral("maxHp")).toInt(unit->baseMaxHp()));
+        unit->setAtk(unitObject.value(QStringLiteral("atk")).toInt(unit->baseAtk()));
+        unit->setRange(unitObject.value(QStringLiteral("range")).toInt(unit->baseRange()));
+        unit->setMaxMana(unitObject.value(QStringLiteral("maxMana")).toInt(unit->baseMaxMana()));
+        unit->setMana(unitObject.value(QStringLiteral("mana")).toInt(unit->mana()));
+        unit->setAttackInterval(unitObject.value(QStringLiteral("attackInterval")).toInt(unit->attackInterval()));
+        for (const QString& equipmentName :
+             jsonArrayToStringList(unitObject.value(QStringLiteral("equipmentNames")).toArray())) {
+            unit->addEquipmentName(equipmentName);
+        }
+
+        m_units.append(unit);
+        m_player.addUnit(unit->id());
+
+        const QJsonObject locationObject = unitObject.value(QStringLiteral("location")).toObject();
+        const QString locationType = locationObject.value(QStringLiteral("type")).toString();
+        if (locationType == QStringLiteral("board")) {
+            const QPoint pos(locationObject.value(QStringLiteral("x")).toInt(-1),
+                             locationObject.value(QStringLiteral("y")).toInt(-1));
+            if (m_board.isValidPosition(pos)) {
+                m_board.addUnit(unit, pos);
+            }
+        } else if (locationType == QStringLiteral("bench")) {
+            const int slot = locationObject.value(QStringLiteral("slot")).toInt(-1);
+            if (slot >= 0 && slot < m_benchSlots.size()) {
+                m_benchSlots[slot] = unit;
+                unit->setPosition(QPoint(slot, Board::ROWS));
+            }
+        }
+    }
+}
+
+void Game::loadLegacySaveData(const QByteArray& saveData)
+{
+    QBuffer buffer;
+    buffer.setData(saveData);
+    if (!buffer.open(QIODevice::ReadOnly)) {
+        throw makeRuntimeError(QStringLiteral("旧存档读取失败。"));
+    }
+
+    QTextStream in(&buffer);
+    while (!in.atEnd()) {
+        const QString line = in.readLine();
+        if (line.startsWith(QStringLiteral("PLAYER "))) {
+            const QStringList parts = line.split(' ', Qt::SkipEmptyParts);
+            if (parts.size() >= 6) {
+                m_player.setHp(parts.at(1).toInt());
+                m_player.setGold(parts.at(2).toInt());
+                m_player.setLevel(parts.at(3).toInt());
+                m_player.setPopulationLimit(parts.at(4).toInt());
+                m_player.setCurrentRound(parts.at(5).toInt());
+                if (parts.size() >= 8) {
+                    m_player.setWinStreak(parts.at(6).toInt());
+                    m_player.setLossStreak(parts.at(7).toInt());
+                }
+            }
+        } else if (line.startsWith(QStringLiteral("SHOP"))) {
+            const QStringList parts = line.split('|');
+            m_shopSlots.fill(QString(), 5);
+            for (int i = 1; i < parts.size() && i - 1 < m_shopSlots.size(); ++i) {
+                m_shopSlots[i - 1] = parts.at(i);
+            }
+        } else if (line.startsWith(QStringLiteral("EQUIPMENT"))) {
+            const QStringList parts = line.split('|');
+            for (int i = 1; i < parts.size(); ++i) {
+                if (!parts.at(i).isEmpty()) {
+                    m_equipmentPool.append(equipmentFromName(parts.at(i)));
+                }
+            }
+        } else if (line.startsWith(QStringLiteral("ACHIEVEMENTS"))) {
+            const QStringList parts = line.split('|');
+            for (int i = 1; i < parts.size(); ++i) {
+                if (!parts.at(i).isEmpty() && !m_achievements.contains(parts.at(i))) {
+                    m_achievements.append(parts.at(i));
+                }
+            }
+        } else if (line.startsWith(QStringLiteral("UNIT|"))) {
+            const QStringList parts = line.split('|');
+            if (parts.size() < 10) {
+                continue;
+            }
+
+            Unit* unit = createUnitFromTemplate(parts.at(1), UnitOwner::PlayerCtrl);
+            unit->setStarLevel(parts.at(2).toInt());
+            unit->setHp(parts.at(3).toInt());
+            unit->setMaxHp(parts.at(4).toInt());
+            unit->setAtk(parts.at(5).toInt());
+            unit->setRange(parts.at(6).toInt());
+            unit->setMaxMana(parts.at(7).toInt());
+            unit->setMana(parts.at(8).toInt());
+            m_units.append(unit);
+            m_player.addUnit(unit->id());
+
+            const QString location = parts.at(9);
+            if (location.startsWith(QStringLiteral("BOARD:"))) {
+                const QStringList coords = location.split(':');
+                if (coords.size() == 3) {
+                    m_board.addUnit(unit, QPoint(coords.at(1).toInt(), coords.at(2).toInt()));
+                }
+            } else if (location.startsWith(QStringLiteral("BENCH:"))) {
+                const QStringList slotParts = location.split(':');
+                if (slotParts.size() == 2) {
+                    const int slot = slotParts.at(1).toInt();
+                    if (slot >= 0 && slot < m_benchSlots.size()) {
+                        m_benchSlots[slot] = unit;
+                        unit->setPosition(QPoint(slot, Board::ROWS));
+                    }
+                }
+            }
+        }
+    }
+
+    if (in.status() != QTextStream::Ok) {
+        throw makeRuntimeError(QStringLiteral("读取旧存档文件失败。"));
+    }
+}
+
+void Game::finalizeLoadedGame(int slot)
+{
+    m_eventRewardRound = m_player.currentRound();
+    m_currentEvent = currentEventForRound(m_player.currentRound());
+    generateEnemyRound(m_player.currentRound());
+    const QPoint enemyPositions[] = {QPoint(5, 0), QPoint(6, 0)};
+    int deployedEnemies = 0;
+    for (Unit* unit : m_units) {
+        if (!unit || unit->owner() != UnitOwner::EnemyCtrl || deployedEnemies >= 2) {
+            continue;
+        }
+        unit->resetCombatState();
+        m_board.addUnit(unit, enemyPositions[deployedEnemies]);
+        ++deployedEnemies;
+    }
+
+    m_lastResult = QStringLiteral("存档 %1 读取完成。").arg(slot);
+    addLog(QStringLiteral("读取存档 %1。").arg(slot));
+    checkAchievements();
+    buildScene();
+    syncFromBoard();
+}
+
 bool Game::hasSaveSlot(int slot) const
 {
-    return QFile::exists(saveFileName(slot));
+    return QFile::exists(saveFileName(slot)) || QFile::exists(legacySaveFileName(slot));
 }
 
 QString Game::saveSlotTimeText(int slot) const
 {
-    const QFileInfo info(saveFileName(slot));
-    if (!info.exists())
-    {
+    QFileInfo info(saveFileName(slot));
+    if (!info.exists()) {
+        info.setFile(legacySaveFileName(slot));
+    }
+    if (!info.exists()) {
         return QStringLiteral("未保存");
     }
 
@@ -602,37 +1278,23 @@ void Game::createStarterUnitsIfNeeded()
         }
     };
 
-    addPlayerUnit(createUnitFromTemplate(QStringLiteral("战士"), UnitOwner::PlayerCtrl));
-    addPlayerUnit(createUnitFromTemplate(QStringLiteral("弓手"), UnitOwner::PlayerCtrl));
-    addPlayerUnit(createUnitFromTemplate(QStringLiteral("法师"), UnitOwner::PlayerCtrl));
-    addPlayerUnit(createUnitFromTemplate(QStringLiteral("预备兵"), UnitOwner::PlayerCtrl));
-    addPlayerUnit(createUnitFromTemplate(QStringLiteral("守卫"), UnitOwner::PlayerCtrl));
+    const QStringList starterUnits = unitPool().mid(0, 5);
+    for (const QString& unitName : starterUnits) {
+        addPlayerUnit(createUnitFromTemplate(unitName, UnitOwner::PlayerCtrl));
+    }
 
     generateEnemyRound(m_player.currentRound());
 }
 
 Unit* Game::createUnitFromTemplate(const QString& name, UnitOwner owner) const
 {
-    if (name == QStringLiteral("战士") || name == QStringLiteral("Warrior")) {
-        return new Unit(QStringLiteral("战士"), 120, 14, 1, 80, owner, {QStringLiteral("前排"), QStringLiteral("人类")}, SkillType::PowerStrike);
-    }
-    if (name == QStringLiteral("弓手") || name == QStringLiteral("Archer")) {
-        return new Unit(QStringLiteral("弓手"), 80, 18, 3, 60, owner, {QStringLiteral("游侠"), QStringLiteral("人类")}, SkillType::PowerStrike);
-    }
-    if (name == QStringLiteral("法师") || name == QStringLiteral("Mage")) {
-        return new Unit(QStringLiteral("法师"), 70, 22, 3, 100, owner, {QStringLiteral("奥术"), QStringLiteral("人类")}, SkillType::ArcaneBurst);
-    }
-    if (name == QStringLiteral("预备兵") || name == QStringLiteral("Reserve")) {
-        return new Unit(QStringLiteral("预备兵"), 95, 12, 1, 70, owner, {QStringLiteral("前排"), QStringLiteral("游侠")}, SkillType::SelfHeal);
-    }
-    if (name == QStringLiteral("守卫") || name == QStringLiteral("Guard")) {
-        return new Unit(QStringLiteral("守卫"), 140, 10, 1, 90, owner, {QStringLiteral("前排"), QStringLiteral("奥术")}, SkillType::SelfHeal);
-    }
-    if (name == QStringLiteral("敌方战士") || name == QStringLiteral("Enemy Warrior")) {
-        return new Unit(QStringLiteral("敌方战士"), 120, 15, 1, 80, owner, {QStringLiteral("前排"), QStringLiteral("敌人")}, SkillType::PowerStrike);
-    }
-    if (name == QStringLiteral("敌方弓手") || name == QStringLiteral("Enemy Archer")) {
-        return new Unit(QStringLiteral("敌方弓手"), 85, 18, 3, 60, owner, {QStringLiteral("游侠"), QStringLiteral("敌人")}, SkillType::ArcaneBurst);
+    for (const UnitTemplate& unitTemplate : unitTemplates()) {
+        if (name != unitTemplate.name && !unitTemplate.aliases.contains(name)) {
+            continue;
+        }
+
+        return new Unit(unitTemplate.name, unitTemplate.hp, unitTemplate.atk, unitTemplate.range, unitTemplate.maxMana,
+                        owner, unitTemplate.traits, unitTemplate.skillType);
     }
 
     return new Unit(name, 100, 10, 1, 100, owner, {QStringLiteral("普通")}, SkillType::PowerStrike);
@@ -640,13 +1302,13 @@ Unit* Game::createUnitFromTemplate(const QString& name, UnitOwner owner) const
 
 QStringList Game::unitPool() const
 {
-    return {
-        QStringLiteral("战士"),
-        QStringLiteral("弓手"),
-        QStringLiteral("法师"),
-        QStringLiteral("预备兵"),
-        QStringLiteral("守卫")
-    };
+    QStringList pool;
+    for (const UnitTemplate& unitTemplate : unitTemplates()) {
+        if (unitTemplate.shopAvailable) {
+            pool.append(unitTemplate.name);
+        }
+    }
+    return pool;
 }
 
 void Game::rollShop()
@@ -767,15 +1429,11 @@ void Game::refreshTraitBonuses()
         }
     }
 
-    const QHash<QString, int> counts = traitCounts();
-    const int humanAtkBonus = counts.value(QStringLiteral("人类")) >= 4
-        ? 25
-        : (counts.value(QStringLiteral("人类")) >= 2 ? 10 : 0);
-    const int frontHpBonus = counts.value(QStringLiteral("前排")) >= 3
-        ? 240
-        : (counts.value(QStringLiteral("前排")) >= 2 ? 120 : 0);
-    const bool rangerDoubleStrike = counts.value(QStringLiteral("游侠")) >= 2;
-    const bool arcaneFocus = counts.value(QStringLiteral("奥术")) >= 2;
+    const QVector<ActiveTraitBonus> activeBonuses = activeTraitBonuses(traitCounts());
+    int teamAtkBonus = 0;
+    for (const ActiveTraitBonus& bonus : activeBonuses) {
+        teamAtkBonus += bonus.threshold.teamAtkBonus;
+    }
 
     for (Unit* unit : m_units) {
         if (!unit || unit->owner() != UnitOwner::PlayerCtrl) {
@@ -788,31 +1446,27 @@ void Game::refreshTraitBonuses()
         }
 
         int maxHpBonus = 0;
-        int atkBonus = humanAtkBonus;
+        int atkBonus = teamAtkBonus;
         int rangeBonus = 0;
         int maxManaBonus = 0;
         int manaGainBonus = 0;
         int skillAmpPercent = 0;
         int extraStrikeChance = 0;
 
-        if (frontHpBonus > 0 && unit->traits().contains(QStringLiteral("前排"))) {
-            maxHpBonus += frontHpBonus;
-        }
-        if (rangerDoubleStrike && unit->traits().contains(QStringLiteral("游侠"))) {
-            extraStrikeChance = 35;
-        }
-        if (arcaneFocus && unit->traits().contains(QStringLiteral("奥术"))) {
-            maxManaBonus -= 10;
-            manaGainBonus += 10;
-            skillAmpPercent += 25;
+        for (const ActiveTraitBonus& bonus : activeBonuses) {
+            if (!unit->traits().contains(bonus.name)) {
+                continue;
+            }
+
+            maxHpBonus += bonus.threshold.traitMaxHpBonus;
+            rangeBonus += bonus.threshold.traitRangeBonus;
+            maxManaBonus += bonus.threshold.traitMaxManaBonus;
+            manaGainBonus += bonus.threshold.traitManaGainBonus;
+            skillAmpPercent += bonus.threshold.traitSkillAmpPercent;
+            extraStrikeChance = qMax(extraStrikeChance, bonus.threshold.traitExtraStrikeChance);
         }
 
-        unit->setTraitBonuses(maxHpBonus,
-                              atkBonus,
-                              rangeBonus,
-                              maxManaBonus,
-                              manaGainBonus,
-                              skillAmpPercent,
+        unit->setTraitBonuses(maxHpBonus, atkBonus, rangeBonus, maxManaBonus, manaGainBonus, skillAmpPercent,
                               extraStrikeChance);
     }
 }
@@ -822,24 +1476,8 @@ QString Game::activeTraitsText() const
     const QHash<QString, int> counts = traitCounts();
     QStringList active;
 
-    const int humans = counts.value(QStringLiteral("人类"));
-    if (humans >= 2) {
-        active << QStringLiteral("人类×%1：全队攻击+%2").arg(humans).arg(humans >= 4 ? 25 : 10);
-    }
-
-    const int fronts = counts.value(QStringLiteral("前排"));
-    if (fronts >= 2) {
-        active << QStringLiteral("前排×%1：前排生命+%2").arg(fronts).arg(fronts >= 3 ? 240 : 120);
-    }
-
-    const int rangers = counts.value(QStringLiteral("游侠"));
-    if (rangers >= 2) {
-        active << QStringLiteral("游侠×%1：普攻35%连击").arg(rangers);
-    }
-
-    const int arcanes = counts.value(QStringLiteral("奥术"));
-    if (arcanes >= 2) {
-        active << QStringLiteral("奥术×%1：技能+25%，法力更快").arg(arcanes);
+    for (const ActiveTraitBonus& bonus : activeTraitBonuses(counts)) {
+        active << QStringLiteral("%1×%2：%3").arg(bonus.name).arg(bonus.count).arg(bonus.threshold.description);
     }
 
     return active.isEmpty() ? QStringLiteral("无") : active.join(QStringLiteral("，"));
@@ -853,16 +1491,7 @@ Equipment Game::randomEquipment() const
 
 Equipment Game::equipmentFromName(const QString& name) const
 {
-    if (name == QStringLiteral("活力甲") || name == QStringLiteral("Vitality Armor")) {
-        return Equipment(EquipmentType::VitalityArmor);
-    }
-    if (name == QStringLiteral("迅捷符") || name == QStringLiteral("Swift Charm")) {
-        return Equipment(EquipmentType::SwiftCharm);
-    }
-    if (name == QStringLiteral("法力护符") || name == QStringLiteral("Mana Amulet")) {
-        return Equipment(EquipmentType::ManaAmulet);
-    }
-    return Equipment(EquipmentType::TrainingSword);
+    return Equipment::fromName(name);
 }
 
 void Game::generateEnemyRound(int round)
@@ -876,37 +1505,21 @@ void Game::generateEnemyRound(int round)
         return nullptr;
     };
 
-    Unit* enemyWarrior = findEnemyByName(QStringLiteral("敌方战士"));
-    if (!enemyWarrior) {
-        enemyWarrior = createUnitFromTemplate(QStringLiteral("敌方战士"), UnitOwner::EnemyCtrl);
-        m_units.append(enemyWarrior);
-    }
+    const bool eliteRound = roundEventForRound(round).key == QStringLiteral("elite");
+    for (const EnemyRoundTemplate& enemyTemplate : enemyRoundTemplates()) {
+        Unit* enemy = findEnemyByName(enemyTemplate.name);
+        if (!enemy) {
+            enemy = createUnitFromTemplate(enemyTemplate.name, UnitOwner::EnemyCtrl);
+            m_units.append(enemy);
+        }
 
-    Unit* enemyArcher = findEnemyByName(QStringLiteral("敌方弓手"));
-    if (!enemyArcher) {
-        enemyArcher = createUnitFromTemplate(QStringLiteral("敌方弓手"), UnitOwner::EnemyCtrl);
-        m_units.append(enemyArcher);
-    }
-
-    const int growth = qMax(0, round - 1) * 20;
-    enemyWarrior->setMaxHp(120 + growth);
-    enemyWarrior->setHp(enemyWarrior->maxHp());
-    enemyWarrior->setAtk(15 + qMax(0, round - 1) * 2);
-    enemyWarrior->setMana(0);
-
-    enemyArcher->setMaxHp(85 + growth);
-    enemyArcher->setHp(enemyArcher->maxHp());
-    enemyArcher->setAtk(18 + qMax(0, round - 1) * 2);
-    enemyArcher->setMana(0);
-
-    if (round > 0 && round % 5 == 0) {
-        enemyWarrior->setMaxHp(enemyWarrior->maxHp() + 80);
-        enemyWarrior->setHp(enemyWarrior->maxHp());
-        enemyWarrior->setAtk(enemyWarrior->atk() + 5);
-
-        enemyArcher->setMaxHp(enemyArcher->maxHp() + 60);
-        enemyArcher->setHp(enemyArcher->maxHp());
-        enemyArcher->setAtk(enemyArcher->atk() + 5);
+        const int roundOffset = qMax(0, round - 1);
+        const int eliteHp = eliteRound ? enemyTemplate.eliteMaxHpBonus : 0;
+        const int eliteAtk = eliteRound ? enemyTemplate.eliteAtkBonus : 0;
+        enemy->setMaxHp(enemyTemplate.baseMaxHp + roundOffset * enemyTemplate.hpGrowth + eliteHp);
+        enemy->setHp(enemy->maxHp());
+        enemy->setAtk(enemyTemplate.baseAtk + roundOffset * enemyTemplate.atkGrowth + eliteAtk);
+        enemy->setMana(0);
     }
 }
 
@@ -1022,9 +1635,7 @@ bool Game::isBoardPosition(const QPoint& gridPos) const
 
 bool Game::isBenchPosition(const QPoint& gridPos) const
 {
-    return gridPos.y() == Board::ROWS
-        && gridPos.x() >= 0
-        && gridPos.x() < m_benchSlotCount;
+    return gridPos.y() == Board::ROWS && gridPos.x() >= 0 && gridPos.x() < m_benchSlotCount;
 }
 
 bool Game::canApplyDrop(int unitId, const QPoint& source, const QPoint& target) const
@@ -1150,9 +1761,7 @@ Unit* Game::nearestEnemyFor(Unit* unit) const
     int bestHp = std::numeric_limits<int>::max();
 
     for (Unit* candidate : m_units) {
-        if (!candidate
-            || !candidate->isAlive()
-            || candidate->owner() == unit->owner()) {
+        if (!candidate || !candidate->isAlive() || candidate->owner() == unit->owner()) {
             continue;
         }
 
@@ -1162,16 +1771,11 @@ Unit* Game::nearestEnemyFor(Unit* unit) const
         }
 
         const int distance = gridDistance(unit, candidate);
-        if (distance < bestDistance
-            || (distance == bestDistance && candidate->hp() < bestHp)
-            || (distance == bestDistance
-                && candidate->hp() == bestHp
-                && candidate->position().y() < (best ? best->position().y() : Board::ROWS))
-            || (distance == bestDistance
-                && candidate->hp() == bestHp
-                && best
-                && candidate->position().y() == best->position().y()
-                && candidate->position().x() < best->position().x())) {
+        if (distance < bestDistance || (distance == bestDistance && candidate->hp() < bestHp) ||
+            (distance == bestDistance && candidate->hp() == bestHp &&
+             candidate->position().y() < (best ? best->position().y() : Board::ROWS)) ||
+            (distance == bestDistance && candidate->hp() == bestHp && best &&
+             candidate->position().y() == best->position().y() && candidate->position().x() < best->position().x())) {
             best = candidate;
             bestDistance = distance;
             bestHp = candidate->hp();
@@ -1210,9 +1814,7 @@ QPoint Game::nextStepToward(Unit* unit, Unit* target) const
         return from;
     }
 
-    auto indexOf = [](const QPoint& pos) {
-        return pos.y() * Board::COLS + pos.x();
-    };
+    auto indexOf = [](const QPoint& pos) { return pos.y() * Board::COLS + pos.x(); };
 
     QVector<int> previous(Board::ROWS * Board::COLS, -1);
     QVector<bool> visited(Board::ROWS * Board::COLS, false);
@@ -1221,12 +1823,7 @@ QPoint Game::nextStepToward(Unit* unit, Unit* target) const
     queue.append(from);
     visited[indexOf(from)] = true;
 
-    const std::array<QPoint, 4> directions = {
-        QPoint(1, 0),
-        QPoint(-1, 0),
-        QPoint(0, 1),
-        QPoint(0, -1)
-    };
+    const std::array<QPoint, 4> directions = {QPoint(1, 0), QPoint(-1, 0), QPoint(0, 1), QPoint(0, -1)};
 
     QPoint bestReachable = from;
     int bestDistance = gridDistance(from, targetPos);
@@ -1317,9 +1914,8 @@ void Game::attackTarget(Unit* unit, Unit* target)
     applyDamage(target, unit->atk());
     addLog(QStringLiteral("%1攻击%2，造成%3伤害。").arg(unit->name(), target->name()).arg(unit->atk()));
 
-    if (target->isAlive()
-        && unit->traitExtraStrikeChance() > 0
-        && QRandomGenerator::global()->bounded(100) < unit->traitExtraStrikeChance()) {
+    if (target->isAlive() && unit->traitExtraStrikeChance() > 0 &&
+        QRandomGenerator::global()->bounded(100) < unit->traitExtraStrikeChance()) {
         const int bonusDamage = qMax(1, unit->atk() / 2);
         applyDamage(target, bonusDamage);
         addLog(QStringLiteral("%1触发游侠连击，追加%2伤害。").arg(unit->name()).arg(bonusDamage));
@@ -1358,16 +1954,13 @@ void Game::applyDamage(Unit* target, int damage)
 
 bool Game::sideDefeated(UnitOwner owner) const
 {
-    for (Unit* unit : m_units)
-    {
-        if (!unit || unit->owner() != owner || !unit->isAlive())
-        {
+    for (Unit* unit : m_units) {
+        if (!unit || unit->owner() != owner || !unit->isAlive()) {
             continue;
         }
 
         const QPoint pos = unit->position();
-        if (m_board.isValidPosition(pos) && m_board.getUnitAt(pos) == unit)
-        {
+        if (m_board.isValidPosition(pos) && m_board.getUnitAt(pos) == unit) {
             return false;
         }
     }
@@ -1437,13 +2030,7 @@ void Game::finishCombat(bool playerWon)
 
 QString Game::currentEventForRound(int round) const
 {
-    if (round > 0 && round % 5 == 0) {
-        return QStringLiteral("精英来袭：本轮敌人属性提升。");
-    }
-    if (round > 0 && round % 3 == 0) {
-        return QStringLiteral("丰收回合：准备阶段额外获得3金币。");
-    }
-    return QStringLiteral("无");
+    return roundEventForRound(round).description;
 }
 
 void Game::updateRoundEvent()
@@ -1456,25 +2043,32 @@ void Game::updateRoundEvent()
     m_eventRewardRound = m_player.currentRound();
     addLog(QStringLiteral("触发事件：%1").arg(m_currentEvent));
 
-    if (m_player.currentRound() % 3 == 0 && m_player.currentRound() % 5 != 0) {
-        m_player.setGold(m_player.gold() + 3);
-        addLog(QStringLiteral("丰收回合奖励：金币+3。"));
+    const RoundEvent event = roundEventForRound(m_player.currentRound());
+    if (event.goldBonus > 0) {
+        m_player.setGold(m_player.gold() + event.goldBonus);
+        addLog(QStringLiteral("事件奖励：金币+%1。").arg(event.goldBonus));
         checkAchievements();
     }
 }
 
 QString Game::saveFileName(int slot) const
 {
+    return QStringLiteral("savegame_%1.json").arg(qBound(1, slot, 3));
+}
+
+QString Game::legacySaveFileName(int slot) const
+{
     return QStringLiteral("savegame_%1.txt").arg(qBound(1, slot, 3));
 }
 
-void Game::addLog(const QString& message)
+void Game::addLog(const QString& message, LogCategory category)
 {
     if (message.isEmpty()) {
         return;
     }
 
-    m_logs.prepend(message);
+    const LogCategory inferredCategory = inferLogCategory(message);
+    m_logs.prepend({message, category == LogCategory::System ? inferredCategory : category});
     while (m_logs.size() > 8) {
         m_logs.removeLast();
     }
@@ -1581,8 +2175,7 @@ void Game::buildScene()
         }
     }
 
-    for (int slot = 0; slot < m_benchSlotCount; ++slot)
-    {
+    for (int slot = 0; slot < m_benchSlotCount; ++slot) {
         GridItem* benchItem = new GridItem(Board::ROWS, slot, benchCellPolygon(slot));
         benchItem->setZValue(kZGrid);
         benchItem->setBaseColor(QColor(58, 78, 62));
@@ -1615,10 +2208,8 @@ void Game::buildScene()
     benchLabel->setPos(0, benchToWorld(0).y() - 54);
 
     const QRectF leftPanelRect(-320.0, -40.0, 290.0, 360.0);
-    QGraphicsRectItem* leftPanelBack = m_scene->addRect(
-        leftPanelRect,
-        QPen(QColor(88, 92, 100), 1),
-        QBrush(QColor(29, 31, 36, 232)));
+    QGraphicsRectItem* leftPanelBack =
+        m_scene->addRect(leftPanelRect, QPen(QColor(88, 92, 100), 1), QBrush(QColor(29, 31, 36, 232)));
     leftPanelBack->setZValue(kZGrid + 0.05);
 
     QFont panelFont = labelFont;
@@ -1632,10 +2223,8 @@ void Game::buildScene()
 
     const qreal panelX = gridToWorld(0, Board::COLS - 1).x() + 96.0;
     const QRectF panelRect(panelX, -40.0, 400.0, 700.0);
-    QGraphicsRectItem* panelBack = m_scene->addRect(
-        panelRect,
-        QPen(QColor(88, 92, 100), 1),
-        QBrush(QColor(29, 31, 36, 232)));
+    QGraphicsRectItem* panelBack =
+        m_scene->addRect(panelRect, QPen(QColor(88, 92, 100), 1), QBrush(QColor(29, 31, 36, 232)));
     panelBack->setZValue(kZGrid + 0.05);
 
     m_infoPanel = m_scene->addText(QString(), panelFont);
@@ -1653,14 +2242,10 @@ void Game::buildScene()
         m_unitItems.push_back(unitItem);
         m_unitItemById[unit->id()] = unitItem;
 
-        connect(unitItem, &UnitItem::unitSelected,
-                this, &Game::handleUnitSelected);
-        connect(unitItem, &UnitItem::dragStarted,
-                this, &Game::handleDragStarted);
-        connect(unitItem, &UnitItem::dragMoved,
-                this, &Game::handleDragMoved);
-        connect(unitItem, &UnitItem::dragDropped,
-                this, &Game::handleDropCommand);
+        connect(unitItem, &UnitItem::unitSelected, this, &Game::handleUnitSelected);
+        connect(unitItem, &UnitItem::dragStarted, this, &Game::handleDragStarted);
+        connect(unitItem, &UnitItem::dragMoved, this, &Game::handleDragMoved);
+        connect(unitItem, &UnitItem::dragDropped, this, &Game::handleDropCommand);
     }
 
     m_scene->setSceneRect(totalBounds.adjusted(-40, -40, 40, 40));
@@ -1675,8 +2260,7 @@ void Game::syncFromBoard()
             continue;
         }
 
-        item->setDragEnabled(m_phase == GamePhase::Prepare
-                             && item->unit()->owner() == UnitOwner::PlayerCtrl);
+        item->setDragEnabled(m_phase == GamePhase::Prepare && item->unit()->owner() == UnitOwner::PlayerCtrl);
         item->setSelectedActive(item->unitId() == m_selectedUnitId);
 
         const QPoint pos = item->unit()->position();
@@ -1722,19 +2306,15 @@ void Game::updateInfoPanel()
         return;
     }
 
-    auto safe = [](const QString& value) {
-        return value.toHtmlEscaped();
-    };
+    auto safe = [](const QString& value) { return value.toHtmlEscaped(); };
     auto badge = [](const QString& text, const QString& color) {
-        return QStringLiteral("<span style='color:%1; font-weight:700;'>%2</span>")
-            .arg(color, text.toHtmlEscaped());
+        return QStringLiteral("<span style='color:%1; font-weight:700;'>%2</span>").arg(color, text.toHtmlEscaped());
     };
     auto metric = [](const QString& label, const QString& value, const QString& color) {
-        return QStringLiteral(
-                   "<td width='50%' style='padding:3px 5px;'>"
-                   "<span style='color:#9fa6b2;'>%1</span><br/>"
-                   "<span style='color:%3; font-size:12pt; font-weight:700;'>%2</span>"
-                   "</td>")
+        return QStringLiteral("<td width='50%' style='padding:3px 5px;'>"
+                              "<span style='color:#9fa6b2;'>%1</span><br/>"
+                              "<span style='color:%3; font-size:12pt; font-weight:700;'>%2</span>"
+                              "</td>")
             .arg(label.toHtmlEscaped(), value.toHtmlEscaped(), color);
     };
     auto section = [](const QString& title, const QString& body, const QString& accentColor) {
@@ -1751,51 +2331,54 @@ void Game::updateInfoPanel()
     QString selectedHtml = QStringLiteral("<span style='color:#8f96a3;'>未选择单位</span>");
 
     if (selected) {
-        const QString ownerText = selected->owner() == UnitOwner::PlayerCtrl
-            ? QStringLiteral("己方")
-            : QStringLiteral("敌方");
-        const QString ownerColor = selected->owner() == UnitOwner::PlayerCtrl
-            ? QStringLiteral("#8fb3ff")
-            : QStringLiteral("#ff918f");
+        const QString ownerText =
+            selected->owner() == UnitOwner::PlayerCtrl ? QStringLiteral("己方") : QStringLiteral("敌方");
+        const QString ownerColor =
+            selected->owner() == UnitOwner::PlayerCtrl ? QStringLiteral("#8fb3ff") : QStringLiteral("#ff918f");
         QStringList bonusParts;
         if (selected->traitSkillAmpPercent() > 0) {
-            bonusParts << badge(QStringLiteral("技能+%1%").arg(selected->traitSkillAmpPercent()), QStringLiteral("#d9b8ff"));
+            bonusParts << badge(QStringLiteral("技能+%1%").arg(selected->traitSkillAmpPercent()),
+                                QStringLiteral("#d9b8ff"));
         }
         if (selected->traitExtraStrikeChance() > 0) {
-            bonusParts << badge(QStringLiteral("连击%1%").arg(selected->traitExtraStrikeChance()), QStringLiteral("#ffd36a"));
+            bonusParts << badge(QStringLiteral("连击%1%").arg(selected->traitExtraStrikeChance()),
+                                QStringLiteral("#ffd36a"));
         }
         if (selected->traitManaGainBonus() > 0) {
-            bonusParts << badge(QStringLiteral("回蓝+%1").arg(selected->traitManaGainBonus()), QStringLiteral("#7dc7ff"));
+            bonusParts << badge(QStringLiteral("回蓝+%1").arg(selected->traitManaGainBonus()),
+                                QStringLiteral("#7dc7ff"));
         }
 
         QStringList selectedRows;
         selectedRows << QStringLiteral("<tr>%1%2</tr>")
-                            .arg(metric(QStringLiteral("生命"), QStringLiteral("%1/%2").arg(selected->hp()).arg(selected->maxHp()), QStringLiteral("#80d98f")),
-                                 metric(QStringLiteral("法力"), QStringLiteral("%1/%2").arg(selected->mana()).arg(selected->maxMana()), QStringLiteral("#78b9ff")));
+                            .arg(metric(QStringLiteral("生命"),
+                                        QStringLiteral("%1/%2").arg(selected->hp()).arg(selected->maxHp()),
+                                        QStringLiteral("#80d98f")),
+                                 metric(QStringLiteral("法力"),
+                                        QStringLiteral("%1/%2").arg(selected->mana()).arg(selected->maxMana()),
+                                        QStringLiteral("#78b9ff")));
         selectedRows << QStringLiteral("<tr>%1%2</tr>")
-                            .arg(metric(QStringLiteral("攻击"), QString::number(selected->atk()), QStringLiteral("#ffd36a")),
-                                 metric(QStringLiteral("射程"), QString::number(selected->range()), QStringLiteral("#d8dce4")));
+                            .arg(metric(QStringLiteral("攻击"), QString::number(selected->atk()),
+                                        QStringLiteral("#ffd36a")),
+                                 metric(QStringLiteral("射程"), QString::number(selected->range()),
+                                        QStringLiteral("#d8dce4")));
 
-        selectedHtml = QStringLiteral(
-                           "<div style='font-size:11pt; font-weight:700;'>%1 "
+        selectedHtml =
+            QStringLiteral("<div style='font-size:11pt; font-weight:700;'>%1 "
                            "<span style='color:%2; font-size:9pt;'>%3</span></div>"
                            "<div style='color:#aeb5c1; margin-top:2px;'>%4星 · %5 · %6</div>"
                            "<table width='100%' cellspacing='0' cellpadding='0' style='margin-top:5px;'>%7</table>"
                            "<div style='margin-top:4px; color:#aeb5c1;'>羁绊：%8</div>"
                            "<div style='margin-top:2px; color:#aeb5c1;'>加成：%9</div>"
                            "<div style='margin-top:2px; color:#aeb5c1;'>装备：%10</div>")
-                           .arg(safe(selected->name()),
-                                ownerColor,
-                                safe(ownerText),
-                                QString::number(selected->starLevel()),
-                                safe(stateName(selected->state())),
-                                safe(skillName(selected->skillType())),
-                                selectedRows.join(QString()),
-                                safe(selected->traits().join(QStringLiteral("，"))),
-                                bonusParts.isEmpty() ? QStringLiteral("<span style='color:#8f96a3;'>无</span>") : bonusParts.join(QStringLiteral("，")),
-                                selected->equipmentNames().isEmpty()
-                                    ? QStringLiteral("<span style='color:#8f96a3;'>无</span>")
-                                    : safe(selected->equipmentNames().join(QStringLiteral("，"))));
+                .arg(safe(selected->name()), ownerColor, safe(ownerText), QString::number(selected->starLevel()),
+                     safe(stateName(selected->state())), safe(skillName(selected->skillType())),
+                     selectedRows.join(QString()), safe(selected->traits().join(QStringLiteral("，"))),
+                     bonusParts.isEmpty() ? QStringLiteral("<span style='color:#8f96a3;'>无</span>")
+                                          : bonusParts.join(QStringLiteral("，")),
+                     selected->equipmentNames().isEmpty()
+                         ? QStringLiteral("<span style='color:#8f96a3;'>无</span>")
+                         : safe(selected->equipmentNames().join(QStringLiteral("，"))));
     }
 
     int benchUsed = 0;
@@ -1808,25 +2391,28 @@ void Game::updateInfoPanel()
     QStringList shopRows;
     for (int i = 0; i < m_shopSlots.size(); ++i) {
         const QString unitName = m_shopSlots.at(i);
-        const QString slotText = unitName.isEmpty()
-            ? QStringLiteral("<span style='color:#8f96a3;'>已售出</span>")
-            : QStringLiteral("<span style='color:#f2f4f8;'>%1</span> <span style='color:#ffd36a;'>3金</span>")
-                  .arg(safe(unitName));
-        shopRows << QStringLiteral(
-                        "<tr><td width='22' style='color:#9fa6b2;'>%1.</td>"
-                        "<td style='padding:2px 0;'>%2</td></tr>")
+        const QString slotText =
+            unitName.isEmpty()
+                ? QStringLiteral("<span style='color:#8f96a3;'>已售出</span>")
+                : QStringLiteral("<span style='color:#f2f4f8;'>%1</span> <span style='color:#ffd36a;'>3金</span>")
+                      .arg(safe(unitName));
+        shopRows << QStringLiteral("<tr><td width='22' style='color:#9fa6b2;'>%1.</td>"
+                                   "<td style='padding:2px 0;'>%2</td></tr>")
                         .arg(i + 1)
                         .arg(slotText);
     }
 
     QStringList equipmentLines;
     for (const Equipment& equipment : m_equipmentPool) {
-        equipmentLines << QStringLiteral("%1 <span style='color:#9fa6b2;'>%2</span>")
-                              .arg(safe(equipment.name()), safe(equipment.description()));
+        equipmentLines << QStringLiteral(
+                              "%1 <span style='color:%2;'>[%3]</span> <span style='color:#9fa6b2;'>%4</span>")
+                              .arg(safe(equipment.name()), equipment.rarityColor(), safe(equipment.rarity()),
+                                   safe(equipment.description()));
     }
     QStringList visibleEquipment = equipmentLines.mid(0, 3);
     if (equipmentLines.size() > visibleEquipment.size()) {
-        visibleEquipment << QStringLiteral("<span style='color:#8f96a3;'>还有%1件...</span>").arg(equipmentLines.size() - visibleEquipment.size());
+        visibleEquipment << QStringLiteral("<span style='color:#8f96a3;'>还有%1件...</span>")
+                                .arg(equipmentLines.size() - visibleEquipment.size());
     }
 
     QStringList visibleAchievements = m_achievements.mid(0, 4);
@@ -1834,26 +2420,30 @@ void Game::updateInfoPanel()
         achievement = safe(achievement);
     }
     if (m_achievements.size() > visibleAchievements.size()) {
-        visibleAchievements << QStringLiteral("<span style='color:#8f96a3;'>还有%1项...</span>").arg(m_achievements.size() - visibleAchievements.size());
+        visibleAchievements << QStringLiteral("<span style='color:#8f96a3;'>还有%1项...</span>")
+                                   .arg(m_achievements.size() - visibleAchievements.size());
     }
     const QString achievementsText = visibleAchievements.isEmpty()
-        ? QStringLiteral("<span style='color:#8f96a3;'>无</span>")
-        : visibleAchievements.join(QStringLiteral("，"));
+                                         ? QStringLiteral("<span style='color:#8f96a3;'>无</span>")
+                                         : visibleAchievements.join(QStringLiteral("，"));
 
-    QStringList visibleLogs = m_logs.mid(0, 5);
-    for (QString& log : visibleLogs) {
-        log = safe(log);
+    QStringList visibleLogs;
+    const int visibleLogCount = qMin(5, m_logs.size());
+    for (int i = 0; i < visibleLogCount; ++i) {
+        const GameLog& log = m_logs.at(i);
+        visibleLogs << QStringLiteral("<span style='color:%1; font-weight:700;'>[%2]</span> %3")
+                           .arg(logCategoryColor(log.category), safe(logCategoryText(log.category)), safe(log.message));
     }
     const QString logsText = visibleLogs.isEmpty()
-        ? QStringLiteral("<span style='color:#8f96a3;'>暂无</span>")
-        : QStringLiteral("<div style='line-height:125%; color:#c4cad4;'>%1</div>").arg(visibleLogs.join(QStringLiteral("<br/>")));
+                                 ? QStringLiteral("<span style='color:#8f96a3;'>暂无</span>")
+                                 : QStringLiteral("<div style='line-height:125%; color:#c4cad4;'>%1</div>")
+                                       .arg(visibleLogs.join(QStringLiteral("<br/>")));
 
-    const QString phaseColor = m_phase == GamePhase::Combat
-        ? QStringLiteral("#e0a447")
-        : (m_phase == GamePhase::Resolve ? QStringLiteral("#a78bfa") : QStringLiteral("#58c28d"));
-    const QString resultColor = m_phase == GamePhase::Combat
-        ? QStringLiteral("#f1d18a")
-        : QStringLiteral("#d9dde6");
+    const QString phaseColor =
+        m_phase == GamePhase::Combat
+            ? QStringLiteral("#e0a447")
+            : (m_phase == GamePhase::Resolve ? QStringLiteral("#a78bfa") : QStringLiteral("#58c28d"));
+    const QString resultColor = m_phase == GamePhase::Combat ? QStringLiteral("#f1d18a") : QStringLiteral("#d9dde6");
 
     const QString globalBody =
         QStringLiteral("<table width='100%' cellspacing='0' cellpadding='0'>"
@@ -1863,9 +2453,7 @@ void Game::updateInfoPanel()
                        "<div style='margin-top:2px; color:#9fa6b2;'>事件：%5</div>")
             .arg(metric(QStringLiteral("阶段"), phaseName(), phaseColor),
                  metric(QStringLiteral("轮次"), QString::number(m_player.currentRound()), QStringLiteral("#d8dce4")),
-                 resultColor,
-                 safe(m_lastResult),
-                 safe(m_currentEvent));
+                 resultColor, safe(m_lastResult), safe(m_currentEvent));
 
     const QString playerMetrics =
         QStringLiteral("<table width='100%' cellspacing='0' cellpadding='0'>"
@@ -1877,46 +2465,45 @@ void Game::updateInfoPanel()
                  metric(QStringLiteral("金币"), QString::number(m_player.gold()), QStringLiteral("#ffd36a")),
                  metric(QStringLiteral("等级"), QString::number(m_player.level()), QStringLiteral("#d8dce4")),
                  metric(QStringLiteral("轮次"), QString::number(m_player.currentRound()), QStringLiteral("#d8dce4")),
-                 metric(QStringLiteral("上阵"), QStringLiteral("%1/%2").arg(playerBoardUnitCount()).arg(m_player.populationLimit()), QStringLiteral("#8fb3ff")),
-                 metric(QStringLiteral("备战区"), QStringLiteral("%1/%2").arg(benchUsed).arg(m_benchSlotCount), QStringLiteral("#8fd9a2")));
+                 metric(QStringLiteral("上阵"),
+                        QStringLiteral("%1/%2").arg(playerBoardUnitCount()).arg(m_player.populationLimit()),
+                        QStringLiteral("#8fb3ff")),
+                 metric(QStringLiteral("备战区"), QStringLiteral("%1/%2").arg(benchUsed).arg(m_benchSlotCount),
+                        QStringLiteral("#8fd9a2")));
 
     const QString economyBody =
-        QStringLiteral(
-            "<div style='color:#aeb5c1;'>利息 <span style='color:#ffd36a;'>+%1</span> · 连胜/连败 "
-            "<span style='color:#f2f4f8;'>%2/%3</span></div>"
-            "<table width='100%' cellspacing='0' cellpadding='0' style='margin-top:4px;'>%4</table>"
-            "<div style='margin-top:5px; color:#aeb5c1;'>羁绊：%5</div>"
-            "<div style='margin-top:2px; color:#aeb5c1;'>装备池：%6</div>"
-            "<div style='margin-top:2px; color:#aeb5c1;'>成就：%7</div>")
+        QStringLiteral("<div style='color:#aeb5c1;'>利息 <span style='color:#ffd36a;'>+%1</span> · 连胜/连败 "
+                       "<span style='color:#f2f4f8;'>%2/%3</span></div>"
+                       "<table width='100%' cellspacing='0' cellpadding='0' style='margin-top:4px;'>%4</table>"
+                       "<div style='margin-top:5px; color:#aeb5c1;'>羁绊：%5</div>"
+                       "<div style='margin-top:2px; color:#aeb5c1;'>装备池：%6</div>"
+                       "<div style='margin-top:2px; color:#aeb5c1;'>成就：%7</div>")
             .arg(interestGold())
             .arg(m_player.winStreak())
             .arg(m_player.lossStreak())
             .arg(shopRows.join(QString()))
             .arg(safe(activeTraitsText()))
-            .arg(visibleEquipment.isEmpty()
-                     ? QStringLiteral("<span style='color:#8f96a3;'>无</span>")
-                     : visibleEquipment.join(QStringLiteral("，")))
+            .arg(visibleEquipment.isEmpty() ? QStringLiteral("<span style='color:#8f96a3;'>无</span>")
+                                            : visibleEquipment.join(QStringLiteral("，")))
             .arg(achievementsText);
 
-    const QString leftHtml =
-        QStringLiteral(
-            "<html><body style='font-family:\"Microsoft YaHei\",\"Segoe UI\",sans-serif; font-size:9pt; color:#eef1f6;'>"
-            "%1"
-            "%2"
-            "</body></html>")
-            .arg(section(QStringLiteral("全局"), globalBody, phaseColor),
-                 section(QStringLiteral("玩家状态"), playerMetrics, QStringLiteral("#8fb3ff")));
+    const QString leftHtml = QStringLiteral("<html><body style='font-family:\"Microsoft YaHei\",\"Segoe "
+                                            "UI\",sans-serif; font-size:9pt; color:#eef1f6;'>"
+                                            "%1"
+                                            "%2"
+                                            "</body></html>")
+                                 .arg(section(QStringLiteral("全局"), globalBody, phaseColor),
+                                      section(QStringLiteral("玩家状态"), playerMetrics, QStringLiteral("#8fb3ff")));
 
-    const QString rightHtml =
-        QStringLiteral(
-            "<html><body style='font-family:\"Microsoft YaHei\",\"Segoe UI\",sans-serif; font-size:9pt; color:#eef1f6;'>"
-            "%1"
-            "%2"
-            "%3"
-            "</body></html>")
-            .arg(section(QStringLiteral("运营"), economyBody, QStringLiteral("#ffd36a")),
-                 section(QStringLiteral("选中单位"), selectedHtml, QStringLiteral("#c8b6ff")),
-                 section(QStringLiteral("最近日志"), logsText, QStringLiteral("#8fd9a2")));
+    const QString rightHtml = QStringLiteral("<html><body style='font-family:\"Microsoft YaHei\",\"Segoe "
+                                             "UI\",sans-serif; font-size:9pt; color:#eef1f6;'>"
+                                             "%1"
+                                             "%2"
+                                             "%3"
+                                             "</body></html>")
+                                  .arg(section(QStringLiteral("运营"), economyBody, QStringLiteral("#ffd36a")),
+                                       section(QStringLiteral("选中单位"), selectedHtml, QStringLiteral("#c8b6ff")),
+                                       section(QStringLiteral("最近日志"), logsText, QStringLiteral("#8fd9a2")));
 
     m_leftInfoPanel->setHtml(leftHtml);
     m_infoPanel->setHtml(rightHtml);
@@ -1947,10 +2534,7 @@ QPoint Game::worldToGrid(const QPointF& world) const
 
     if (m_board.isValidPosition(gridPos)) {
         const QPointF center = gridToWorld(row, col);
-        const QRectF cellRect(center.x() - m_cellSize * 0.5,
-                              center.y() - m_cellSize * 0.5,
-                              m_cellSize,
-                              m_cellSize);
+        const QRectF cellRect(center.x() - m_cellSize * 0.5, center.y() - m_cellSize * 0.5, m_cellSize, m_cellSize);
         if (cellRect.contains(world)) {
             return gridPos;
         }
@@ -1958,10 +2542,7 @@ QPoint Game::worldToGrid(const QPointF& world) const
 
     for (int slot = 0; slot < m_benchSlotCount; ++slot) {
         const QPointF center = benchToWorld(slot);
-        const QRectF cellRect(center.x() - m_cellSize * 0.5,
-                              center.y() - m_cellSize * 0.5,
-                              m_cellSize,
-                              m_cellSize);
+        const QRectF cellRect(center.x() - m_cellSize * 0.5, center.y() - m_cellSize * 0.5, m_cellSize, m_cellSize);
         if (cellRect.contains(world)) {
             return QPoint(slot, Board::ROWS);
         }

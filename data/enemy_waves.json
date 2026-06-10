@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "enemies": [
+    {
+      "name": "敌方战士",
+      "baseMaxHp": 120,
+      "baseAtk": 15,
+      "hpGrowth": 20,
+      "atkGrowth": 2,
+      "eliteMaxHpBonus": 80,
+      "eliteAtkBonus": 5
+    },
+    {
+      "name": "敌方弓手",
+      "baseMaxHp": 85,
+      "baseAtk": 18,
+      "hpGrowth": 20,
+      "atkGrowth": 2,
+      "eliteMaxHpBonus": 60,
+      "eliteAtkBonus": 5
+    }
+  ]
+}

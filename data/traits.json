@@ -1,0 +1,57 @@
+{
+  "version": 1,
+  "traits": [
+    {
+      "name": "人类",
+      "thresholds": [
+        {
+          "count": 2,
+          "description": "全队攻击+10",
+          "teamAtkBonus": 10
+        },
+        {
+          "count": 4,
+          "description": "全队攻击+25",
+          "teamAtkBonus": 25
+        }
+      ]
+    },
+    {
+      "name": "前排",
+      "thresholds": [
+        {
+          "count": 2,
+          "description": "前排生命+120",
+          "traitMaxHpBonus": 120
+        },
+        {
+          "count": 3,
+          "description": "前排生命+240",
+          "traitMaxHpBonus": 240
+        }
+      ]
+    },
+    {
+      "name": "游侠",
+      "thresholds": [
+        {
+          "count": 2,
+          "description": "普攻35%连击",
+          "traitExtraStrikeChance": 35
+        }
+      ]
+    },
+    {
+      "name": "奥术",
+      "thresholds": [
+        {
+          "count": 2,
+          "description": "技能+25%，法力更快",
+          "traitMaxManaBonus": -10,
+          "traitManaGainBonus": 10,
+          "traitSkillAmpPercent": 25
+        }
+      ]
+    }
+  ]
+}

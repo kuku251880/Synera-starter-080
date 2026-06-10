@@ -30,6 +30,22 @@ enum class GamePhase
     Resolve
 };
 
+enum class LogCategory
+{
+    System,
+    Combat,
+    Skill,
+    Economy,
+    SaveLoad,
+    Trait
+};
+
+struct GameLog
+{
+    QString message;
+    LogCategory category;
+};
+
 class Game : public QObject
 {
     Q_OBJECT
@@ -105,7 +121,11 @@ private:
     QString currentEventForRound(int round) const;
     void updateRoundEvent();
     QString saveFileName(int slot) const;
-    void addLog(const QString& message);
+    QString legacySaveFileName(int slot) const;
+    void loadJsonSaveData(const QByteArray& saveData);
+    void loadLegacySaveData(const QByteArray& saveData);
+    void finalizeLoadedGame(int slot);
+    void addLog(const QString& message, LogCategory category = LogCategory::System);
     void unlockAchievement(const QString& name);
     void checkAchievements();
     QString phaseName() const;
@@ -143,7 +163,7 @@ private:
     QString m_lastResult;
     QString m_currentEvent;
     QStringList m_achievements;
-    QStringList m_logs;
+    QVector<GameLog> m_logs;
     int m_eventRewardRound;
     std::unordered_map<int, UnitItem*> m_unitItemById;
 

@@ -1,0 +1,57 @@
+{
+  "version": 1,
+  "equipment": [
+    {
+      "type": "TrainingSword",
+      "name": "训练剑",
+      "aliases": ["Training Sword"],
+      "description": "攻击 +15",
+      "rarity": "普通",
+      "rarityColor": "#aeb5c1",
+      "atkBonus": 15,
+      "maxHpBonus": 0,
+      "hpBonus": 0,
+      "attackIntervalBonus": 0,
+      "maxManaBonus": 0
+    },
+    {
+      "type": "VitalityArmor",
+      "name": "活力甲",
+      "aliases": ["Vitality Armor"],
+      "description": "生命 +150",
+      "rarity": "稀有",
+      "rarityColor": "#64d2ff",
+      "atkBonus": 0,
+      "maxHpBonus": 150,
+      "hpBonus": 150,
+      "attackIntervalBonus": 0,
+      "maxManaBonus": 0
+    },
+    {
+      "type": "SwiftCharm",
+      "name": "迅捷符",
+      "aliases": ["Swift Charm"],
+      "description": "攻击间隔 -1",
+      "rarity": "稀有",
+      "rarityColor": "#64d2ff",
+      "atkBonus": 0,
+      "maxHpBonus": 0,
+      "hpBonus": 0,
+      "attackIntervalBonus": -1,
+      "maxManaBonus": 0
+    },
+    {
+      "type": "ManaAmulet",
+      "name": "法力护符",
+      "aliases": ["Mana Amulet"],
+      "description": "最大法力 -30",
+      "rarity": "精良",
+      "rarityColor": "#a78bfa",
+      "atkBonus": 0,
+      "maxHpBonus": 0,
+      "hpBonus": 0,
+      "attackIntervalBonus": 0,
+      "maxManaBonus": -30
+    }
+  ]
+}
