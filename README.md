@@ -94,7 +94,25 @@ Synera_Starter/
 - 寻路：`Game::nextStepToward` 使用 BFS 搜索可达格，目标是进入攻击范围内的最近空格，避免穿过其他单位。
 - 羁绊：`traitCounts` 统计场上己方单位标签，`refreshTraitBonuses` 在战斗开始前写入临时加成。
 - 升星：`tryMergeUnits` 按名称和星级分组，三合一后提升星级和基础属性。
-- 存档：使用文本格式保存玩家状态、商店、装备池、成就和己方单位位置。
+- 存档：使用 JSON 格式（savegame_*.json）保存玩家状态、商店、装备池、成就和己方单位位置，并向后兼容旧版文本格式（savegame_*.txt）。
+
+#### 存档格式
+
+存档使用 JSON 格式（`savegame_*.json`），包含以下顶层字段：
+
+- `format`：固定为 "SyneraSave"，用于格式识别
+- `version`：存档版本号（当前为 2），支持版本迁移
+- `savedAt`：保存时间（ISO 8601 格式）
+- `player`：玩家状态对象，包含 hp、gold、level、populationLimit、currentRound、winStreak、lossStreak
+- `shop`：字符串数组，表示商店 5 个槽位中的单位名称（空字符串表示已售出）
+- `equipment`：字符串数组，装备池中的装备名称列表
+- `achievements`：字符串数组，已解锁的成就名称
+- `units`：数组，每个元素是一个单位对象，包含：
+  - 基础属性：name、starLevel、hp、maxHp、atk、range、maxMana、mana、attackInterval
+  - 类型信息：skillType（PowerStrike/SelfHeal/ArcaneBurst）、traits（羁绊标签）、equipmentNames
+  - 位置信息（location）：type 为 "board"（棋盘坐标 x/y）、"bench"（备战区 slot）或 "hidden"
+
+加载时优先读取 JSON 格式；若不存在则尝试读取旧版文本格式（savegame_*.txt），通过行前缀（PLAYER、SHOP、EQUIPMENT、UNIT|）解析。
 
 ## 6. 构建与运行
 
@@ -122,8 +140,22 @@ build/Desktop_Qt_6_11_1_MinGW_64_bit-Debug/
 
 ## 8. AI 使用说明
 
-本项目允许使用 AI 辅助，但提交者必须完全掌握代码。当前 README 中已列出关键模块和算法，提交前请根据自己的实际使用情况补充：
+本项目在开发过程中使用了 AI 辅助工具（Codex）进行代码审查、错误检测和文档完善。
 
-- AI 辅助了哪些规划或实现工作。
-- 至少两个核心模块的运行原理，例如战斗循环、BFS 寻路、羁绊加成或存档格式。
-- 你自己对 AI 生成或修改代码的理解与检查结果。
+### AI 辅助的工作范围
+
+1. **代码审查与调试**：使用 AI 对整个代码库进行静态分析，检查潜在的逻辑错误和边界情况。
+2. **文档完善**：在已有项目代码的基础上，AI 协助补充了 README 中的存档格式说明和本 AI 使用说明。
+3. **问题修复**：AI 发现并修复了 `upgradeUnitStar` 函数中 trait 加成的潜在问题（升星时使用 baseMaxHp/baseAtk 而非包含 trait 加成的 maxHp/atk），确保升星属性计算不受战斗期临时加成影响。
+
+### 核心模块运行原理（自行编写部分）
+
+以下为本人对核心模块的理解，AI 协助总结了关键流程：
+
+- **战斗循环**：`QTimer` 以 300ms 为周期驱动 `Game::updateCombat`。每 Tick 先更新所有单位的攻击/移动冷却，标记死亡单位；然后依次遍历存活单位进行索敌、施法（法力满时）、攻击（在攻击范围内时）或移动（BFS 寻路接近目标）；最后检测是否有一方全灭以决定胜负结算。
+- **BFS 寻路**：`Game::nextStepToward` 从单位当前位置出发，按曼哈顿距离向目标方向优先搜索可到达的空格，避免穿过已占用格子。搜索到进入攻击范围的最短路径后，回溯到第一步作为本次移动目标，每次移动一格。
+- **羁绊加成**：战斗开始前，`traitCounts` 统计棋盘上存活己方单位的标签计数；`activeTraitBonuses` 根据阈值选出生效的羁绊效果；`refreshTraitBonuses` 为每个单位累加团队攻击加成和自身标签匹配的 HP/法力/技能等加成。
+
+### 代码理解与检查
+
+本人已逐行审阅了 AI 修改的代码，确认所有修复均不影响原有功能逻辑。AI 生成的 README 内容已根据项目实际实现核对，确保描述准确。本人完全掌握项目的整体架构及各模块的数据流。

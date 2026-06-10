@@ -23,6 +23,67 @@ class QTimer;
 class GridItem;
 class UnitItem;
 
+// Game balance constants, centralized for easy tuning.
+// All values have inline defaults so no JSON dependency is required.
+namespace GameConstants {
+
+// Economy
+inline constexpr int kUnitCost = 3;
+inline constexpr int kRerollCost = 2;
+inline constexpr int kMaxLevel = 8;
+inline constexpr int kInitialPopulation = 4;
+inline constexpr int kMaxPopulation = 8;
+inline constexpr int kInitialPlayerHp = 100;
+inline constexpr int kInitialPlayerGold = 10;
+inline constexpr int kVictoryGold = 5;
+inline constexpr int kLossGold = 2;
+inline constexpr int kHpLossOnDefeat = 10;
+inline constexpr int kInterestDivisor = 10;
+inline constexpr int kInterestMax = 3;
+inline constexpr int kWinStreakBonusCap = 3;
+inline constexpr int kLossStreakBonusCap = 2;
+inline constexpr int kStreakThreshold = 2;
+
+// Combat
+inline constexpr int kCombatTickIntervalMs = 300;
+inline constexpr int kMoveCooldown = 4;
+inline constexpr int kDefaultAttackInterval = 4;
+inline constexpr int kManaGainPerAttack = 30;
+inline constexpr int kMaxEquipmentPerUnit = 3;
+
+// Board & bench layout
+inline constexpr int kBenchSlotCount = 8;
+inline constexpr int kEnemyDeployCount = 2;
+inline constexpr qreal kCellSize = 64.0;
+inline constexpr qreal kCellGap = 4.0;
+inline constexpr qreal kBenchGap = 52.0;
+
+// Shop
+inline constexpr int kShopSlotCount = 5;
+
+// Star-up scaling (multiply base stats by 1.7 per star)
+inline constexpr int kStarUpFactorNumerator = 17;
+inline constexpr int kStarUpFactorDenominator = 10;
+
+// Achievement thresholds
+inline constexpr int kGoldSaveThreshold = 20;
+inline constexpr int kLevelUpThreshold = 3;
+inline constexpr int kStreakAchievementThreshold = 3;
+
+// Star-up limits
+inline constexpr int kMaxStarLevel = 2; // 3-star is max, but game only tracks 1->2
+
+// Progressive level-up cost: level 1->2 costs 6, 2->3 costs 8, etc.
+inline constexpr int levelUpCost(int currentLevel) {
+    if (currentLevel >= kMaxLevel) return 999;
+    return 4 + currentLevel * 2;
+}
+
+// Log display
+inline constexpr int kMaxLogCount = 8;
+
+} // namespace GameConstants
+
 enum class GamePhase
 {
     Prepare,
@@ -65,6 +126,10 @@ public:
     void saveGame(int slot);
     void loadGame();
     void loadGame(int slot);
+    int levelUpCost() const { return GameConstants::levelUpCost(m_player.level()); }
+    bool maxLevelReached() const { return m_player.level() >= GameConstants::kMaxLevel; }
+    void sellSelectedUnit();
+    QString unitInfoForName(const QString& name) const;
     bool hasSaveSlot(int slot) const;
     QString saveSlotTimeText(int slot) const;
 
@@ -78,7 +143,7 @@ public:
     void handleUnitSelected(int unitId);
 
 private:
-    void setupRoundBoard();
+    void setupRoundBoard(bool preservePlayerLayout = false);
     void createStarterUnitsIfNeeded();
     Unit* createUnitFromTemplate(const QString& name, UnitOwner owner) const;
     QStringList unitPool() const;

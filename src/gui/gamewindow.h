@@ -20,6 +20,7 @@ public:
 private slots:
     void onResetButtonClicked();
     void onStartCombatButtonClicked();
+    void onSellButtonClicked();
 
 protected:
     void resizeEvent(QResizeEvent* event) override;
@@ -27,6 +28,7 @@ protected:
 private:
     void setupUI();
     void fitSceneInView();
+    void updateLevelUpButtonText();
     void showShopDialog();
     void showArchiveDialog(bool loadMode);
 
@@ -40,6 +42,7 @@ private:
     QPushButton* m_equipButton;
     QPushButton* m_saveButton;
     QPushButton* m_loadButton;
+    QPushButton* m_sellButton;
     Game* m_game;
 };
 

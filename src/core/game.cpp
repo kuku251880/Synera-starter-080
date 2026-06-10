@@ -593,13 +593,13 @@ QString logCategoryColor(LogCategory category)
 } // namespace
 
 Game::Game(QObject* parent)
-    : QObject(parent), m_benchSlots(8, nullptr), m_shopSlots(5), m_scene(new QGraphicsScene(this)),
+    : QObject(parent), m_benchSlots(GameConstants::kBenchSlotCount, nullptr), m_shopSlots(GameConstants::kShopSlotCount), m_scene(new QGraphicsScene(this)),
       m_leftInfoPanel(nullptr), m_infoPanel(nullptr), m_combatTimer(new QTimer(this)), m_dragActive(false),
       m_activeUnitId(-1), m_selectedUnitId(-1), m_sourceGrid(-1, -1), m_phase(GamePhase::Prepare),
       m_lastResult(QStringLiteral("请布置你的阵容。")), m_currentEvent(QStringLiteral("无")), m_eventRewardRound(0),
-      m_rows(Board::ROWS), m_cols(Board::COLS), m_benchSlotCount(8), m_cellSize(64.0), m_cellGap(4.0), m_benchGap(52.0)
+      m_rows(Board::ROWS), m_cols(Board::COLS), m_benchSlotCount(GameConstants::kBenchSlotCount), m_cellSize(GameConstants::kCellSize), m_cellGap(GameConstants::kCellGap), m_benchGap(GameConstants::kBenchGap)
 {
-    m_combatTimer->setInterval(300);
+    m_combatTimer->setInterval(GameConstants::kCombatTickIntervalMs);
     connect(m_combatTimer, &QTimer::timeout, this, &Game::updateCombat);
 }
 
@@ -626,10 +626,10 @@ void Game::reset()
     m_achievements.clear();
     m_logs.clear();
     m_eventRewardRound = 0;
-    m_player.setHp(100);
-    m_player.setGold(10);
+    m_player.setHp(GameConstants::kInitialPlayerHp);
+    m_player.setGold(GameConstants::kInitialPlayerGold);
     m_player.setLevel(1);
-    m_player.setPopulationLimit(4);
+    m_player.setPopulationLimit(GameConstants::kInitialPopulation);
     m_player.setCurrentRound(1);
     m_player.setWinStreak(0);
     m_player.setLossStreak(0);
@@ -670,8 +670,20 @@ void Game::startCombat()
     m_combatTimer->start();
 }
 
-void Game::setupRoundBoard()
+void Game::setupRoundBoard(bool preservePlayerLayout)
 {
+    // Save player unit board positions before clearing (if preserving layout)
+    QHash<int, QPoint> savedPositions;
+    if (preservePlayerLayout) {
+        for (Unit* unit : m_units) {
+            if (!unit || unit->owner() != UnitOwner::PlayerCtrl) continue;
+            const QPoint pos = unit->position();
+            if (m_board.isValidPosition(pos) && m_board.getUnitAt(pos) == unit) {
+                savedPositions[unit->id()] = pos;
+            }
+        }
+    }
+
     m_board.clear();
     m_benchSlots.fill(nullptr, m_benchSlotCount);
     updateRoundEvent();
@@ -679,32 +691,72 @@ void Game::setupRoundBoard()
 
     const QPoint playerPositions[] = {QPoint(0, 7), QPoint(1, 7), QPoint(2, 7)};
     const QPoint enemyPositions[] = {QPoint(5, 0), QPoint(6, 0)};
+    constexpr int kPlayerDefaultCount = 3;
 
-    int deployedPlayers = 0;
+    // Reset all units before repositioning
+    for (Unit* unit : m_units) {
+        if (!unit) continue;
+        unit->clearTraitBonuses();
+        unit->resetCombatState();
+    }
+
     int benchSlot = 0;
     int deployedEnemies = 0;
 
+    // Place enemies
     for (Unit* unit : m_units) {
-        if (!unit) {
-            continue;
+        if (!unit || unit->owner() != UnitOwner::EnemyCtrl) continue;
+        if (deployedEnemies < GameConstants::kEnemyDeployCount) {
+            m_board.addUnit(unit, enemyPositions[deployedEnemies]);
+            ++deployedEnemies;
         }
+    }
 
-        unit->clearTraitBonuses();
-        unit->resetCombatState();
+    // Place player units
+    const int populationCap = m_player.populationLimit();
+    int boardSlotsUsed = 0;
+    QSet<int> placedIds;
 
-        if (unit->owner() == UnitOwner::EnemyCtrl) {
-            if (deployedEnemies < 2) {
-                m_board.addUnit(unit, enemyPositions[deployedEnemies]);
-                ++deployedEnemies;
+    // Pass 1: restore saved board positions (if preserving layout)
+    if (preservePlayerLayout) {
+        for (Unit* unit : m_units) {
+            if (!unit || unit->owner() != UnitOwner::PlayerCtrl) continue;
+            if (boardSlotsUsed >= populationCap) break;
+            auto savedIt = savedPositions.constFind(unit->id());
+            if (savedIt != savedPositions.constEnd()) {
+                const QPoint& pos = savedIt.value();
+                if (m_board.isValidPosition(pos) && m_board.isPlayerHalf(pos) && !m_board.hasUnitAt(pos)) {
+                    m_board.addUnit(unit, pos);
+                    placedIds.insert(unit->id());
+                    ++boardSlotsUsed;
+                }
             }
-            continue;
         }
+    }
 
-        if (deployedPlayers < 3) {
-            m_board.addUnit(unit, playerPositions[deployedPlayers]);
-            ++deployedPlayers;
-            continue;
+    // Pass 2: fill remaining board slots with default positions
+    int posIdx = 0;
+    for (Unit* unit : m_units) {
+        if (!unit || unit->owner() != UnitOwner::PlayerCtrl) continue;
+        if (placedIds.contains(unit->id())) continue;
+        if (boardSlotsUsed >= populationCap) break;
+
+        while (posIdx < kPlayerDefaultCount) {
+            const QPoint& pos = playerPositions[posIdx];
+            ++posIdx;
+            if (!m_board.hasUnitAt(pos)) {
+                m_board.addUnit(unit, pos);
+                placedIds.insert(unit->id());
+                ++boardSlotsUsed;
+                break;
+            }
         }
+    }
+
+    // Pass 3: remaining units go to bench
+    for (Unit* unit : m_units) {
+        if (!unit || unit->owner() != UnitOwner::PlayerCtrl) continue;
+        if (placedIds.contains(unit->id())) continue;
 
         if (benchSlot < m_benchSlotCount) {
             m_benchSlots[benchSlot] = unit;
@@ -802,8 +854,7 @@ void Game::buyShopUnit(int slot)
         return;
     }
 
-    constexpr int kUnitCost = 3;
-    if (m_player.gold() < kUnitCost) {
+    if (m_player.gold() < GameConstants::kUnitCost) {
         m_lastResult = QStringLiteral("金币不足。");
         updateInfoPanel();
         return;
@@ -817,7 +868,7 @@ void Game::buyShopUnit(int slot)
         return;
     }
 
-    m_player.setGold(m_player.gold() - kUnitCost);
+    m_player.setGold(m_player.gold() - GameConstants::kUnitCost);
     m_units.append(unit);
     m_player.addUnit(unit->id());
     m_shopSlots[slot].clear();
@@ -835,17 +886,16 @@ void Game::rerollShop()
         return;
     }
 
-    constexpr int kRerollCost = 2;
-    if (m_player.gold() < kRerollCost) {
+    if (m_player.gold() < GameConstants::kRerollCost) {
         m_lastResult = QStringLiteral("金币不足，无法刷新商店。");
         updateInfoPanel();
         return;
     }
 
-    m_player.setGold(m_player.gold() - kRerollCost);
+    m_player.setGold(m_player.gold() - GameConstants::kRerollCost);
     rollShop();
     m_lastResult = QStringLiteral("商店已刷新。");
-    addLog(QStringLiteral("刷新商店，花费%1金币。").arg(kRerollCost));
+    addLog(QStringLiteral("刷新商店，花费%1金币。").arg(GameConstants::kRerollCost));
     checkAchievements();
     updateInfoPanel();
 }
@@ -856,21 +906,20 @@ void Game::levelUp()
         return;
     }
 
-    constexpr int kLevelCost = 6;
-    if (m_player.level() >= 8) {
+    if (m_player.level() >= GameConstants::kMaxLevel) {
         m_lastResult = QStringLiteral("已经达到最高等级。");
         updateInfoPanel();
         return;
     }
-    if (m_player.gold() < kLevelCost) {
+    if (m_player.gold() < GameConstants::levelUpCost(m_player.level())) {
         m_lastResult = QStringLiteral("金币不足，无法升级。");
         updateInfoPanel();
         return;
     }
 
-    m_player.setGold(m_player.gold() - kLevelCost);
+    m_player.setGold(m_player.gold() - GameConstants::levelUpCost(m_player.level()));
     m_player.setLevel(m_player.level() + 1);
-    m_player.setPopulationLimit(qMin(8, m_player.populationLimit() + 1));
+    m_player.setPopulationLimit(qMin(GameConstants::kMaxPopulation, m_player.populationLimit() + 1));
     m_lastResult = QStringLiteral("升级成功，人口上限提升。");
     addLog(QStringLiteral("升级到%1级，人口上限为%2。").arg(m_player.level()).arg(m_player.populationLimit()));
     checkAchievements();
@@ -892,7 +941,7 @@ void Game::equipSelectedUnit()
         return;
     }
 
-    if (unit->equipmentNames().size() >= 3) {
+    if (unit->equipmentNames().size() >= GameConstants::kMaxEquipmentPerUnit) {
         m_lastResult = QStringLiteral("该单位装备数量已满。");
         updateInfoPanel();
         return;
@@ -903,6 +952,45 @@ void Game::equipSelectedUnit()
     m_lastResult = QStringLiteral("已给%1装备%2。").arg(unit->name(), equipment.name());
     addLog(m_lastResult);
     checkAchievements();
+    syncFromBoard();
+}
+
+void Game::sellSelectedUnit()
+{
+    if (m_phase != GamePhase::Prepare) {
+        return;
+    }
+
+    Unit* unit = findUnitById(m_selectedUnitId);
+    if (!unit || unit->owner() != UnitOwner::PlayerCtrl) {
+        m_lastResult = QStringLiteral("请先选择一个己方单位来出售。");
+        updateInfoPanel();
+        return;
+    }
+
+    const int sellPrice = GameConstants::kUnitCost * unit->starLevel();
+    const QString unitName = unit->name();
+
+    const QPoint pos = unit->position();
+    if (m_board.isValidPosition(pos) && m_board.getUnitAt(pos) == unit) {
+        m_board.removeUnit(unit);
+    } else {
+        const int benchSlot = benchIndexOf(unit);
+        if (benchSlot >= 0) {
+            m_benchSlots[benchSlot] = nullptr;
+        }
+    }
+
+    m_player.removeUnit(unit->id());
+    m_units.removeOne(unit);
+    delete unit;
+
+    m_player.setGold(m_player.gold() + sellPrice);
+    m_selectedUnitId = -1;
+    m_lastResult = QStringLiteral("出售了%1，获得%2金币。").arg(unitName).arg(sellPrice);
+    addLog(m_lastResult);
+    checkAchievements();
+    buildScene();
     syncFromBoard();
 }
 
@@ -1300,6 +1388,28 @@ Unit* Game::createUnitFromTemplate(const QString& name, UnitOwner owner) const
     return new Unit(name, 100, 10, 1, 100, owner, {QStringLiteral("普通")}, SkillType::PowerStrike);
 }
 
+QString Game::unitInfoForName(const QString& name) const
+{
+    for (const UnitTemplate& unitTemplate : unitTemplates()) {
+        if (name != unitTemplate.name && !unitTemplate.aliases.contains(name)) {
+            continue;
+        }
+
+        QStringList parts;
+        parts << QStringLiteral("生命:%1").arg(unitTemplate.hp);
+        parts << QStringLiteral("攻击:%1").arg(unitTemplate.atk);
+        parts << QStringLiteral("射程:%1").arg(unitTemplate.range);
+        parts << QStringLiteral("法力:%1").arg(unitTemplate.maxMana);
+        const std::unique_ptr<Skill> skill = createSkill(unitTemplate.skillType);
+        const QString skillName = skill ? skill->name() : QStringLiteral("未知");
+        parts << QStringLiteral("技能:%1").arg(skillName);
+        parts << QStringLiteral("羁绊:%1").arg(unitTemplate.traits.join(QLatin1Char('/')));
+        parts << QStringLiteral("购买:%1金").arg(GameConstants::kUnitCost);
+        return parts.join(QStringLiteral("  "));
+    }
+    return QString();
+}
+
 QStringList Game::unitPool() const
 {
     QStringList pool;
@@ -1314,7 +1424,7 @@ QStringList Game::unitPool() const
 void Game::rollShop()
 {
     const QStringList pool = unitPool();
-    for (int i = 0; i < m_shopSlots.size(); ++i) {
+    for (int i = 0; i < GameConstants::kShopSlotCount; ++i) {
         const int index = QRandomGenerator::global()->bounded(pool.size());
         m_shopSlots[i] = pool.at(index);
     }
@@ -1395,10 +1505,14 @@ void Game::upgradeUnitStar(Unit* unit)
         return;
     }
 
+    // Attribute layering: baseMaxHp/baseAtk store the cumulative base value
+    // (template + previous star-ups + equipment), separate from trait bonuses
+    // that are applied as temporary m_traitMaxHpBonus / m_traitAtkBonus.
+    // Star-up scales the base value to preserve the multiplicative growth curve.
     unit->setStarLevel(unit->starLevel() + 1);
-    unit->setMaxHp(unit->maxHp() * 17 / 10);
-    unit->setHp(unit->maxHp());
-    unit->setAtk(unit->atk() * 17 / 10);
+    unit->setMaxHp(unit->baseMaxHp() * GameConstants::kStarUpFactorNumerator / GameConstants::kStarUpFactorDenominator);
+    unit->setHp(unit->baseMaxHp());
+    unit->setAtk(unit->baseAtk() * GameConstants::kStarUpFactorNumerator / GameConstants::kStarUpFactorDenominator);
 }
 
 QHash<QString, int> Game::traitCounts() const
@@ -1709,7 +1823,6 @@ void Game::updateCombat()
 
         if (!unit->isAlive() && unit->state() != UnitState::Dead) {
             unit->setState(UnitState::Dead);
-            m_board.removeUnit(unit);
         }
     }
 
@@ -1738,6 +1851,16 @@ void Game::updateCombat()
             attackTarget(unit, target);
         } else {
             moveUnitToward(unit, target);
+        }
+    }
+
+    // Deferred death processing: remove dead units from the board
+    for (Unit* unit : m_units) {
+        if (unit && unit->state() == UnitState::Dead) {
+            const QPoint pos = unit->position();
+            if (m_board.isValidPosition(pos) && m_board.getUnitAt(pos) == unit) {
+                m_board.removeUnit(unit);
+            }
         }
     }
 
@@ -1889,14 +2012,14 @@ void Game::moveUnitToward(Unit* unit, Unit* target)
     const QPoint next = nextStepToward(unit, target);
     if (next == from) {
         unit->setState(UnitState::Idle);
-        unit->setMoveCooldown(4);
+        unit->setMoveCooldown(GameConstants::kMoveCooldown);
         return;
     }
 
     m_board.removeUnit(unit);
     m_board.addUnit(unit, next);
     unit->setState(UnitState::Moving);
-    unit->setMoveCooldown(4);
+    unit->setMoveCooldown(GameConstants::kMoveCooldown);
 }
 
 void Game::attackTarget(Unit* unit, Unit* target)
@@ -1910,7 +2033,7 @@ void Game::attackTarget(Unit* unit, Unit* target)
 
     unit->setState(UnitState::Attacking);
     unit->setAttackCooldown(unit->attackInterval());
-    unit->setMana(qMin(unit->maxMana(), unit->mana() + 30 + unit->traitManaGainBonus()));
+    unit->setMana(qMin(unit->maxMana(), unit->mana() + GameConstants::kManaGainPerAttack + unit->traitManaGainBonus()));
     applyDamage(target, unit->atk());
     addLog(QStringLiteral("%1攻击%2，造成%3伤害。").arg(unit->name(), target->name()).arg(unit->atk()));
 
@@ -1947,7 +2070,6 @@ void Game::applyDamage(Unit* target, int damage)
     target->setHp(qMax(0, target->hp() - damage));
     if (target->hp() <= 0) {
         target->setState(UnitState::Dead);
-        m_board.removeUnit(target);
         addLog(QStringLiteral("%1阵亡。").arg(target->name()));
     }
 }
@@ -1970,16 +2092,16 @@ bool Game::sideDefeated(UnitOwner owner) const
 
 int Game::interestGold() const
 {
-    return qMin(3, m_player.gold() / 10);
+    return qMin(GameConstants::kInterestMax, m_player.gold() / GameConstants::kInterestDivisor);
 }
 
 int Game::streakBonusGold(bool playerWon) const
 {
     const int streak = playerWon ? m_player.winStreak() : m_player.lossStreak();
-    if (streak < 2) {
+    if (streak < GameConstants::kStreakThreshold) {
         return 0;
     }
-    return qMin(playerWon ? 3 : 2, streak - 1);
+    return qMin(playerWon ? GameConstants::kWinStreakBonusCap : GameConstants::kLossStreakBonusCap, streak - 1);
 }
 
 void Game::finishCombat(bool playerWon)
@@ -1990,15 +2112,14 @@ void Game::finishCombat(bool playerWon)
     const int interest = interestGold();
 
     if (playerWon) {
-        constexpr int kVictoryGold = 5;
         m_player.setWinStreak(m_player.winStreak() + 1);
         m_player.setLossStreak(0);
         const int streakBonus = streakBonusGold(true);
         Equipment reward = randomEquipment();
-        m_player.setGold(m_player.gold() + kVictoryGold + interest + streakBonus);
+        m_player.setGold(m_player.gold() + GameConstants::kVictoryGold + interest + streakBonus);
         m_equipmentPool.append(reward);
         m_lastResult = QStringLiteral("胜利！基础+%1，利息+%2，连胜+%3，掉落%4。")
-                           .arg(kVictoryGold)
+                           .arg(GameConstants::kVictoryGold)
                            .arg(interest)
                            .arg(streakBonus)
                            .arg(reward.name());
@@ -2007,21 +2128,20 @@ void Game::finishCombat(bool playerWon)
         m_player.setCurrentRound(m_player.currentRound() + 1);
         rollShop();
         m_phase = GamePhase::Prepare;
-        setupRoundBoard();
+        setupRoundBoard(true);
     } else {
-        constexpr int kLossGold = 2;
         m_player.setLossStreak(m_player.lossStreak() + 1);
         m_player.setWinStreak(0);
         const int streakBonus = streakBonusGold(false);
-        m_player.setGold(m_player.gold() + kLossGold + interest + streakBonus);
-        m_player.setHp(qMax(0, m_player.hp() - 10));
+        m_player.setGold(m_player.gold() + GameConstants::kLossGold + interest + streakBonus);
+        m_player.setHp(qMax(0, m_player.hp() - GameConstants::kHpLossOnDefeat));
         m_lastResult = QStringLiteral("失败，生命-10，基础+%1，利息+%2，连败补偿+%3。")
-                           .arg(kLossGold)
+                           .arg(GameConstants::kLossGold)
                            .arg(interest)
                            .arg(streakBonus);
         addLog(m_lastResult);
         m_phase = GamePhase::Prepare;
-        setupRoundBoard();
+        setupRoundBoard(true);
     }
 
     checkAchievements();
@@ -2069,7 +2189,7 @@ void Game::addLog(const QString& message, LogCategory category)
 
     const LogCategory inferredCategory = inferLogCategory(message);
     m_logs.prepend({message, category == LogCategory::System ? inferredCategory : category});
-    while (m_logs.size() > 8) {
+    while (m_logs.size() > GameConstants::kMaxLogCount) {
         m_logs.removeLast();
     }
     updateInfoPanel();
@@ -2087,16 +2207,16 @@ void Game::unlockAchievement(const QString& name)
 
 void Game::checkAchievements()
 {
-    if (m_player.gold() >= 20) {
+    if (m_player.gold() >= GameConstants::kGoldSaveThreshold) {
         unlockAchievement(QStringLiteral("小有积蓄"));
     }
-    if (m_player.level() >= 3) {
+    if (m_player.level() >= GameConstants::kLevelUpThreshold) {
         unlockAchievement(QStringLiteral("扩编成军"));
     }
-    if (m_player.winStreak() >= 3) {
+    if (m_player.winStreak() >= GameConstants::kStreakAchievementThreshold) {
         unlockAchievement(QStringLiteral("连胜经济"));
     }
-    if (m_player.lossStreak() >= 3) {
+    if (m_player.lossStreak() >= GameConstants::kStreakAchievementThreshold) {
         unlockAchievement(QStringLiteral("韧性经营"));
     }
 
@@ -2389,7 +2509,7 @@ void Game::updateInfoPanel()
     }
 
     QStringList shopRows;
-    for (int i = 0; i < m_shopSlots.size(); ++i) {
+    for (int i = 0; i < GameConstants::kShopSlotCount; ++i) {
         const QString unitName = m_shopSlots.at(i);
         const QString slotText =
             unitName.isEmpty()
@@ -2475,7 +2595,7 @@ void Game::updateInfoPanel()
         QStringLiteral("<div style='color:#aeb5c1;'>利息 <span style='color:#ffd36a;'>+%1</span> · 连胜/连败 "
                        "<span style='color:#f2f4f8;'>%2/%3</span></div>"
                        "<table width='100%' cellspacing='0' cellpadding='0' style='margin-top:4px;'>%4</table>"
-                       "<div style='margin-top:5px; color:#aeb5c1;'>羁绊：%5</div>"
+                       "<div style='margin-top:5px; color:#aeb5c1;'>羁绊（仅棋盘）：%5</div>"
                        "<div style='margin-top:2px; color:#aeb5c1;'>装备池：%6</div>"
                        "<div style='margin-top:2px; color:#aeb5c1;'>成就：%7</div>")
             .arg(interestGold())
