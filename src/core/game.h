@@ -46,9 +46,15 @@ public:
     void levelUp();
     void equipSelectedUnit();
     void saveGame();
+    void saveGame(int slot);
     void loadGame();
+    void loadGame(int slot);
+    bool hasSaveSlot(int slot) const;
+    QString saveSlotTimeText(int slot) const;
 
     QGraphicsScene* scene() const { return m_scene; }
+    QVector<QString> shopSlots() const { return m_shopSlots; }
+    int playerGold() const { return m_player.gold(); }
 
     void handleDragStarted(int unitId, const QPoint& sourceGrid, const QPointF& scenePos);
     void handleDragMoved(int unitId, const QPoint& sourceGrid, const QPointF& scenePos);
@@ -66,6 +72,7 @@ private:
     void tryMergeUnits();
     void upgradeUnitStar(Unit* unit);
     QHash<QString, int> traitCounts() const;
+    void refreshTraitBonuses();
     QString activeTraitsText() const;
     Equipment randomEquipment() const;
     Equipment equipmentFromName(const QString& name) const;
@@ -77,6 +84,7 @@ private:
     Unit* unitAtGrid(const QPoint& gridPos) const;
     int playerBoardUnitCount() const;
     void clearGridHighlights();
+    void showDropHints(int unitId, const QPoint& source, const QPoint& hoverTarget);
     bool isBoardPosition(const QPoint& gridPos) const;
     bool isBenchPosition(const QPoint& gridPos) const;
     bool canApplyDrop(int unitId, const QPoint& source, const QPoint& target) const;
@@ -85,15 +93,18 @@ private:
     Unit* nearestEnemyFor(Unit* unit) const;
     int gridDistance(Unit* a, Unit* b) const;
     int gridDistance(const QPoint& a, const QPoint& b) const;
-    QPoint nextStepToward(const QPoint& from, const QPoint& to) const;
+    QPoint nextStepToward(Unit* unit, Unit* target) const;
     void moveUnitToward(Unit* unit, Unit* target);
     void attackTarget(Unit* unit, Unit* target);
     void castSkill(Unit* unit, Unit* target);
     void applyDamage(Unit* target, int damage);
     bool sideDefeated(UnitOwner owner) const;
     void finishCombat(bool playerWon);
+    int interestGold() const;
+    int streakBonusGold(bool playerWon) const;
     QString currentEventForRound(int round) const;
     void updateRoundEvent();
+    QString saveFileName(int slot) const;
     void addLog(const QString& message);
     void unlockAchievement(const QString& name);
     void checkAchievements();
@@ -118,6 +129,7 @@ private:
     QVector<Equipment> m_equipmentPool;
 
     QGraphicsScene* m_scene;
+    QGraphicsTextItem* m_leftInfoPanel;
     QGraphicsTextItem* m_infoPanel;
     QTimer* m_combatTimer;
     std::vector<GridItem*> m_gridItems;

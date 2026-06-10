@@ -24,6 +24,7 @@ public:
     void setGridPos(const QPoint& gridPos);
     QPoint gridPos() const { return m_gridPos; }
     void setDragEnabled(bool enabled) { m_dragEnabled = enabled; }
+    void setSelectedActive(bool active);
 
 signals:
     void unitSelected(int unitId);
@@ -46,6 +47,7 @@ private:
     QPoint m_gridPos;
     bool m_dragging;
     bool m_dragEnabled;
+    bool m_selectedActive;
     QPointF m_dragOffset;
     mutable QPixmap m_sprite;
     mutable bool m_spriteTried;

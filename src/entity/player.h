@@ -14,6 +14,8 @@ public:
     int level() const { return m_level; }
     int populationLimit() const { return m_populationLimit; }
     int currentRound() const { return m_currentRound; }
+    int winStreak() const { return m_winStreak; }
+    int lossStreak() const { return m_lossStreak; }
     QSet<int> ownedUnitIds() const { return m_ownedUnitIds; }
 
     void setHp(int hp) { m_hp = hp; }
@@ -21,6 +23,8 @@ public:
     void setLevel(int level) { m_level = level; }
     void setPopulationLimit(int populationLimit) { m_populationLimit = populationLimit; }
     void setCurrentRound(int currentRound) { m_currentRound = currentRound; }
+    void setWinStreak(int streak) { m_winStreak = streak; }
+    void setLossStreak(int streak) { m_lossStreak = streak; }
 
     void addUnit(int unitId);
     void removeUnit(int unitId);
@@ -33,6 +37,8 @@ private:
     int m_level;
     int m_populationLimit;
     int m_currentRound;
+    int m_winStreak;
+    int m_lossStreak;
     QSet<int> m_ownedUnitIds;
 };
 

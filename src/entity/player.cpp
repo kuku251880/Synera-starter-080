@@ -6,6 +6,8 @@ Player::Player()
     , m_level(1)
     , m_populationLimit(4)
     , m_currentRound(1)
+    , m_winStreak(0)
+    , m_lossStreak(0)
 {}
 
 void Player::addUnit(int unitId)

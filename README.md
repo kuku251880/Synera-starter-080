@@ -1,222 +1,131 @@
-# Synera Starter
+# Synera: Synergy Auto-Arena
 
-一个基于 Qt6 与 C++17 的极简自走棋原型（Starter Code），用于课程PA快速起步。
-作为起步demo，主要通过"棋盘渲染" + "单位拖拽"来帮助大家快速理解/上手QT。
+高级程序设计 PA 项目。该项目使用 Qt6 + C++17 实现一个单机 PVE 自走棋原型，包含准备布阵、自动战斗、商店经济、羁绊、升星、装备、存档读档和扩展经济系统。
 
-## 1. 项目说明
-- 本demo只用于帮助大家快速上手QT，并不代表你必须使用这部分内容，部分设计实现与PA说明文档中的要求可能并不一致；
-- 你可以选择自己从0开始另起框架，按照你自己的思路设计，甚至可以使用其他图形库完成PA；
-- 使用此demo进行后续实现时，请务必按照PA说明文档的要求对不一致的部分做出修改(这也意味着你应该至少check一次此demo的代码)；
-- 本README.md只对本demo的部分核心内容做简要说明，详情请阅读源码；
-- 如有QT/C++语法使用问题，请查阅相关文档/求助AI；
-- 完成PA要求时，**一切以PA说明文档为主**!!!
+## 1. 基本信息
 
-## 2. 当前架构
+- 姓名/学号：提交前请补充
+- 项目阶段：阶段一至阶段三主体框架已实现；阶段四实现了利息与连胜/连败奖励扩展
+- 图形库：Qt6 Widgets / QGraphicsScene
+- 构建系统：CMake
 
-### 逻辑层（core / entity）
+## 2. 功能完成度
 
-- `Board`：8x8 棋盘数据与占位规则
-- `Unit`：最小单位数据（`id/name/position/...`，**与PA文档并不一致，需重新设计类并实现多态**）
-- `Game`：协调逻辑、拖拽规则、场景构建与同步
+### 阶段一：棋盘、备战区与基础单位
 
-### 渲染层（gui）
+- 8x8 棋盘，区分敌方半场和玩家半场。
+- 8 格备战区，支持单位在棋盘和备战区之间同步。
+- `Unit` 统一表示己方和敌方单位，通过 `owner` 区分控制归属。
+- 单位包含 HP、ATK、Range、Max Mana、Mana、技能、星级、装备和羁绊标签。
+- 准备阶段支持拖拽布阵，非法落点会回弹；拖拽时会高亮合法落点。
+- GUI 展示棋盘、备战区、单位、商店、玩家信息和日志。
 
-- `QGraphicsScene`：承载所有图元
-- `GridItem`：单个六边形格子（含 hover/drop 高亮）
-- `UnitItem`：单位图元（优先渲染 PNG，失败时回退占位图）
-- `GameWindow`：主窗口（`QGraphicsView + Reset`）
+### 阶段二：PVE 自动战斗
 
-## 3. 目录结构
+- 游戏流程分为准备、战斗、结算三个阶段。
+- 战斗阶段单位自动行动，状态包括待机、移动、攻击、施法、死亡。
+- 敌人随轮次生成并成长，精英轮会获得额外属性。
+- 索敌按距离优先，距离相同时优先血量更低的目标。
+- 移动使用 BFS 寻找可达攻击位，避免穿过已占用格。
+- 普攻回蓝，法力满后自动释放技能。
+- 已实现 3 种技能：强力一击、自我治疗、奥术爆裂。
+- 一方全灭后进入结算，胜利推进轮次，失败扣除玩家生命。
+
+### 阶段三：经济、羁绊、升星、装备、存档
+
+- 商店有 5 个招募位，购买单位消耗 3 金币并进入备战区。
+- 支持花费 2 金币刷新商店。
+- 支持花费 6 金币升级人口，上阵人数受人口上限限制。
+- 三个同名同星级单位会自动合成为更高星单位。
+- 胜利后掉落装备，装备池中的第一件装备可给选中的己方单位穿戴。
+- 已实现 4 种基础装备：训练剑、活力甲、迅捷符、法力护符。
+- 支持保存/读取 `savegame.txt`，保存玩家经济、商店、装备、成就和己方单位位置。
+- 已实现 4 种羁绊并在战斗前实际生效：
+  - 人类 2/4：全队攻击 +10/+25。
+  - 前排 2/3：前排单位生命 +120/+240。
+  - 游侠 2：游侠普攻有 35% 概率追加一次半额伤害。
+  - 奥术 2：奥术单位最大法力降低，普攻回蓝增加，技能伤害 +25%。
+
+### 阶段四：扩展功能
+
+- 高级经济系统：
+  - 每 10 金币产生 1 金币利息，最多 +3。
+  - 连胜达到 2 场后获得额外金币，最高 +3。
+  - 连败达到 2 场后获得补偿金币，最高 +2。
+- 成就与日志系统：
+  - 记录战斗、购买、刷新、装备、升星、经济奖励等事件。
+  - 解锁初战告捷、小有积蓄、扩编成军、初次升星、装备上身、连胜经济、韧性经营等成就。
+
+## 3. 文件结构
 
 ```text
 Synera_Starter/
 |- CMakeLists.txt
 |- README.md
-|- assets/                  # 部分人物的美术资源（PNG/序列帧等,来自craftpix.net）
+|- assets/
 `- src/
    |- main.cpp
    |- core/
-   |  |- board.h
-   |  |- board.cpp
-   |  |- game.h
-   |  `- game.cpp
+   |  |- board.h / board.cpp
+   |  `- game.h / game.cpp
    |- entity/
-   |  |- unit.h
-   |  `- unit.cpp
+   |  |- unit.h / unit.cpp
+   |  |- player.h / player.cpp
+   |  `- equipment.h / equipment.cpp
    `- gui/
-      |- gamewindow.h
-      |- gamewindow.cpp
-      |- griditem.h
-      |- griditem.cpp
-      |- unititem.h
-      `- unititem.cpp
+      |- gamewindow.h / gamewindow.cpp
+      |- griditem.h / griditem.cpp
+      `- unititem.h / unititem.cpp
 ```
 
-## 4. Qt 基本用法（在本项目中对应的部分）
+## 4. 核心类与数据结构
 
-### 4.0 Qt Workflow（从启动到交互）
+- `Game`：主控制器，负责阶段流转、商店、拖拽、战斗 AI、羁绊、装备、存读档和场景同步。
+- `Board`：8x8 棋盘占位结构，负责格子合法性、占用查询和单位放置/移除。
+- `Unit`：战斗单位，保存基础属性、战斗状态、技能类型、羁绊、装备和战斗期临时羁绊加成。
+- `Player`：玩家状态，保存血量、金币、等级、人口、轮次、连胜/连败和拥有单位。
+- `Equipment`：装备类型及属性修改逻辑。
+- `GameWindow`：Qt 主窗口与操作按钮。
+- `GridItem` / `UnitItem`：棋盘格和单位图元，负责绘制、拖拽和交互反馈。
 
-本项目的 QT 工作流可以简化为：
+## 5. 关键算法
 
-1. `main.cpp` 创建 `QApplication`
-2. 创建并显示 `GameWindow`（继承 `QMainWindow`）
-3. `GameWindow` 内部创建 `QGraphicsView` 并挂载 `Game::scene()`
-4. `Game` 构建 `QGraphicsScene`，向场景添加 `GridItem/UnitItem`（均继承 `QGraphicsObject`）
-5. `UnitItem` 通过鼠标事件发出拖拽信号，`Game` 接收后做规则校验并更新 `Board`
-6. `syncFromBoard()` 将最新数据同步回图元位置
+- 拖拽布阵：`UnitItem` 发送拖拽信号，`Game::canApplyDrop` 校验是否符合半场、人口、占用和备战区规则。
+- 战斗循环：`QTimer` 周期调用 `Game::updateCombat`，逐个单位执行状态更新、索敌、移动、攻击或施法。
+- 索敌：优先选择距离最近的敌人；距离相同时选血量更低者，再按坐标稳定排序。
+- 寻路：`Game::nextStepToward` 使用 BFS 搜索可达格，目标是进入攻击范围内的最近空格，避免穿过其他单位。
+- 羁绊：`traitCounts` 统计场上己方单位标签，`refreshTraitBonuses` 在战斗开始前写入临时加成。
+- 升星：`tryMergeUnits` 按名称和星级分组，三合一后提升星级和基础属性。
+- 存档：使用文本格式保存玩家状态、商店、装备池、成就和己方单位位置。
 
-这条链路本质上是：事件输入 -> 信号分发 -> 逻辑更新 -> 渲染同步。
+## 6. 构建与运行
 
-### 4.1 应用入口
+### Qt Creator
 
-- `main.cpp`
-  - 创建 `QApplication`
-  - 创建并显示 `GameWindow`
-  - 进入事件循环 `app.exec()`
+使用 Qt Creator 打开 `CMakeLists.txt`，选择 Qt6 Kit 后 Build / Run。
 
-### 4.2 主窗口与视图
-
-- `GameWindow`
-  - 使用 `QGraphicsView` 显示 `Game::scene()`
-  - 设置基础深色样式
-  - 提供 `Reset` 按钮并连接到 `Game::reset()`
-
-### 4.3 自定义图元（QGraphicsObject）
-
-- `GridItem` 和 `UnitItem` 继承 `QGraphicsObject`
-- 核心重载：
-  - `boundingRect()`：声明图元占用区域（用于重绘、裁剪、拾取）
-  - `paint()`：自定义绘制
-- 交互方式：
-  - `UnitItem` 在鼠标按下/移动/释放时发出拖拽信号
-  - `Game` 接收并执行规则校验与数据更新
-
-### 4.4 信号槽
-
-- `UnitItem::dragStarted/dragMoved/dragDropped`
-  -> 直接连接到 `Game::handleDragStarted/handleDragMoved/handleDropCommand`
-
-### 4.5 connect / signal-slot 机制
-
-- `connect(sender, signal, receiver, slot)` 用于把事件发送方与处理方解耦。
-- signal 只负责“通知发生了什么”，slot 负责“接下来怎么处理”。
-- 本项目中，`UnitItem` 不直接改棋盘数据，而是发信号给 `Game`，由 `Game` 统一处理。
-- 这样做的好处：
-  - 输入层（鼠标事件）和业务层（落子规则）分离
-  - 便于后续替换输入方式（键盘、网络命令等）
-  - 便于调试和扩展（逻辑入口集中在 `Game`）
-
-## 5. UI 与交互规则
-
-### 5.1 棋盘
-
-- 六边形网格，8x8
-- 偶数行水平偏移（错列排布）
-
-### 5.2 单位显示
-
-- 优先加载 PNG sprite（按单位名映射资源路径）
-- 资源不存在时，回退到占位绘制，保证 demo 可运行
-
-### 5.3 拖拽规则
-
-只有满足以下条件才允许移动：
-
-1. 源格与目标格都在棋盘内
-2. 源格与目标格都在玩家半场（`y >= ROWS / 2`）
-3. 目标格为空
-4. 不是原地移动
-5. 源格确实是该单位
-
-### 5.4 UI 拖拽实现
-
-- `UnitItem::mousePressEvent` -> 发 `dragStarted`
-- `UnitItem::mouseMoveEvent` -> 发 `dragMoved`
-- `UnitItem::mouseReleaseEvent` -> 发 `dragDropped`
-- `Game` 在 `handleDragMoved(...)` 中计算候选目标格并更新 hover/drop 高亮
-- `Game` 在 `handleDropCommand(...)` 中执行合法性检查，成功后调用 `applyDrop(...)`
-- 最后通过 `syncFromBoard()` 统一同步 UI
-
-### 5.5 Z 值作用原理
-
-- 在 `QGraphicsScene` 中，图元按 `zValue` 决定遮挡关系，值越大显示越靠上。
-- 本 starter code 当前采用固定三层（在后续拖拽时你也可以选择做 2.5D 行深度设计）：
-  - `GridItem`：`z = 0`
-  - 普通 `UnitItem`：`z = 1`
-  - 拖拽中的 `UnitItem`：`z = 2`
-- 作用：
-  - 保证单位始终在格子上层
-  - 拖拽过程中当前单位不会被其它格子/单位遮挡
-
-## 6. 核心函数说明
-
-### `core/game.cpp`
-
-- `initialize()`：初始化单位，构建场景，执行首次 reset
-- `reset()`：清空棋盘并放回初始单位位置
-- `buildScene()`：创建所有 `GridItem/UnitItem` 并建立信号连接
-- `syncFromBoard()`：根据 `Board` 同步图元位置、可见性与 z 值
-- `handleDragStarted(...)`：记录拖拽上下文并提升当前单位 z 值
-- `handleDragMoved(...)`：计算目标格并更新高亮反馈
-- `handleDropCommand(...)`：执行规则校验，成功后落子并同步渲染
-- `canApplyDrop(...)`：拖拽合法性检查
-- `applyDrop(...)`：真正更新 `Board` 数据
-- `gridToWorld(...) / worldToGrid(...) / cellHexPolygon(...)`：六边形坐标变换与几何生成
-
-### `core/board.cpp`
-
-- `addUnit(...) / removeUnit(...)`：更新占位与单位位置
-- `getUnitAt(...) / hasUnitAt(...)`：查询格子占用
-- `isValidPosition(...) / isPlayerHalf(...)`：规则辅助检查
-- `clear()`：清空棋盘
-
-### `gui/unititem.cpp`
-
-- `paint(...)`：绘制 sprite 或回退占位图
-- `ensureSpriteLoaded()`：懒加载资源，避免重复读取
-- `mousePressEvent/mouseMoveEvent/mouseReleaseEvent`：处理拖拽输入并发信号
-
-### `gui/griditem.cpp`
-
-- `paint(...)`：绘制六边形格子和交互高亮
-- `setHoverActive(...) / setDropActive(...)`：高亮状态切换
-
-## 7. 构建与运行
-
-本项目支持两种常见方式：
-
-1. 使用 Qt Creator IDE 打开并构建
-2. 使用 CMake 在命令行自行配置与构建
-
-### 7.1 使用 Qt Creator
-
-1. 安装 Qt6 与 Qt Creator（官方下载安装：`https://www.qt.io/`）
-2. 打开 Qt Creator，选择 `File -> Open File or Project`
-3. 点击 Configure 后执行 Build / Run
-
-### 7.2 使用 CMake 命令行
-
-#### Linux / macOS
-
-```bash
-mkdir -p build
-cd build
-cmake ..
-cmake --build .
-./Synera_Starter
-```
-
-#### Windows（PowerShell）
+### 命令行
 
 ```powershell
-mkdir build
-cd build
-cmake .. -G "Visual Studio 17 2022"
-cmake --build . --config Release
-.\Release\Synera_Starter.exe
+cmake -S . -B build -G Ninja -DCMAKE_PREFIX_PATH=C:\Qt\6.11.1\mingw_64
+cmake --build build
+.\build\Synera_Starter.exe
 ```
 
-## 8. 资源（assets）说明
+当前 Qt Creator 生成的调试构建目录为：
 
-- **在本PA中UI并不重要，你甚至只需要用QT painter画一些占位符即可**
-- 当前demo中优先使用 PNG 静态首帧，在`assets/`下主要提供一些`2D character sprites`供大家参考
+```text
+build/Desktop_Qt_6_11_1_MinGW_64_bit-Debug/
+```
+
+## 7. 资源说明
+
+`assets/` 中的角色素材来自 CraftPix。提交前请确认素材许可满足课程要求，并在需要时补充来源说明。项目逻辑不依赖精美素材，图片加载失败时会回退到 Qt 绘制的占位单位。
+
+## 8. AI 使用说明
+
+本项目允许使用 AI 辅助，但提交者必须完全掌握代码。当前 README 中已列出关键模块和算法，提交前请根据自己的实际使用情况补充：
+
+- AI 辅助了哪些规划或实现工作。
+- 至少两个核心模块的运行原理，例如战斗循环、BFS 寻路、羁绊加成或存档格式。
+- 你自己对 AI 生成或修改代码的理解与检查结果。

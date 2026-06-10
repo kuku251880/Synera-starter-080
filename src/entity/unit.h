@@ -4,6 +4,7 @@
 #include <QPoint>
 #include <QString>
 #include <QStringList>
+#include <QtGlobal>
 
 enum class UnitOwner
 {
@@ -44,10 +45,14 @@ public:
     QString name() const { return m_name; }
     QPoint position() const { return m_position; }
     int hp() const { return m_hp; }
-    int maxHp() const { return m_maxHp; }
-    int atk() const { return m_atk; }
-    int range() const { return m_range; }
-    int maxMana() const { return m_maxMana; }
+    int maxHp() const { return m_maxHp + m_traitMaxHpBonus; }
+    int atk() const { return m_atk + m_traitAtkBonus; }
+    int range() const { return m_range + m_traitRangeBonus; }
+    int maxMana() const { return qMax(20, m_maxMana + m_traitMaxManaBonus); }
+    int baseMaxHp() const { return m_maxHp; }
+    int baseAtk() const { return m_atk; }
+    int baseRange() const { return m_range; }
+    int baseMaxMana() const { return m_maxMana; }
     int mana() const { return m_mana; }
     UnitOwner owner() const { return m_owner; }
     QStringList traits() const { return m_traits; }
@@ -58,6 +63,9 @@ public:
     int attackInterval() const { return m_attackInterval; }
     int starLevel() const { return m_starLevel; }
     QStringList equipmentNames() const { return m_equipmentNames; }
+    int traitManaGainBonus() const { return m_traitManaGainBonus; }
+    int traitSkillAmpPercent() const { return m_traitSkillAmpPercent; }
+    int traitExtraStrikeChance() const { return m_traitExtraStrikeChance; }
     bool isAlive() const { return m_hp > 0; }
 
     void setName(const QString& name) { m_name = name; }
@@ -77,6 +85,14 @@ public:
     void setAttackInterval(int interval) { m_attackInterval = interval; }
     void setStarLevel(int starLevel) { m_starLevel = starLevel; }
     void addEquipmentName(const QString& name) { m_equipmentNames.append(name); }
+    void setTraitBonuses(int maxHpBonus,
+                         int atkBonus,
+                         int rangeBonus,
+                         int maxManaBonus,
+                         int manaGainBonus,
+                         int skillAmpPercent,
+                         int extraStrikeChance);
+    void clearTraitBonuses();
     void resetCombatState();
 
 private:
@@ -100,6 +116,13 @@ private:
     int m_attackInterval;
     int m_starLevel;
     QStringList m_equipmentNames;
+    int m_traitMaxHpBonus;
+    int m_traitAtkBonus;
+    int m_traitRangeBonus;
+    int m_traitMaxManaBonus;
+    int m_traitManaGainBonus;
+    int m_traitSkillAmpPercent;
+    int m_traitExtraStrikeChance;
 };
 
 #endif // UNIT_H

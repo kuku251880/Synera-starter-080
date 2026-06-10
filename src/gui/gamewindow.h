@@ -27,14 +27,15 @@ protected:
 private:
     void setupUI();
     void fitSceneInView();
+    void showShopDialog();
+    void showArchiveDialog(bool loadMode);
 
     QWidget* m_centralWidget;
     QVBoxLayout* m_mainLayout;
     QGraphicsView* m_view;
     QPushButton* m_resetButton;
     QPushButton* m_startCombatButton;
-    QPushButton* m_buyButtons[5];
-    QPushButton* m_rerollButton;
+    QPushButton* m_shopButton;
     QPushButton* m_levelUpButton;
     QPushButton* m_equipButton;
     QPushButton* m_saveButton;

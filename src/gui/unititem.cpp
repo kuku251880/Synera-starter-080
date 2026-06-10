@@ -11,6 +11,7 @@ UnitItem::UnitItem(Unit* unit, QGraphicsItem* parent)
     , m_gridPos(-1, -1)
     , m_dragging(false)
     , m_dragEnabled(true)
+    , m_selectedActive(false)
     , m_dragOffset(0.0, 0.0)
     , m_spriteTried(false)
 {
@@ -27,6 +28,12 @@ void UnitItem::paint(QPainter* painter, const QStyleOptionGraphicsItem*, QWidget
     painter->setRenderHint(QPainter::Antialiasing);
 
     ensureSpriteLoaded();
+
+    if (m_selectedActive) {
+        painter->setPen(QPen(QColor(255, 218, 107), 2.5));
+        painter->setBrush(QColor(255, 218, 107, 28));
+        painter->drawRoundedRect(QRectF(-43, -53, 86, 103), 6, 6);
+    }
 
     if (!m_sprite.isNull()) {
         const QRectF targetRect(-40, -40, 80, 80);
@@ -77,10 +84,10 @@ void UnitItem::paintStatusOverlay(QPainter* painter) const
         ? QColor(70, 205, 92)
         : QColor(230, 92, 92);
 
-    const qreal barWidth = 74.0;
-    const qreal barHeight = 6.0;
-    const QRectF hpBack(-37, -51, barWidth, barHeight);
-    const QRectF manaBack(-37, -43, barWidth, barHeight);
+    const qreal barWidth = 56.0;
+    const qreal barHeight = 4.0;
+    const QRectF hpBack(-28, -35, barWidth, barHeight);
+    const QRectF manaBack(-28, -29, barWidth, barHeight);
     const qreal hpRatio = qBound(0.0, static_cast<qreal>(m_unit->hp()) / qMax(1, m_unit->maxHp()), 1.0);
     const qreal manaRatio = qBound(0.0, static_cast<qreal>(m_unit->mana()) / qMax(1, m_unit->maxMana()), 1.0);
 
@@ -100,7 +107,7 @@ void UnitItem::paintStatusOverlay(QPainter* painter) const
     font.setBold(true);
     painter->setFont(font);
     painter->setPen(Qt::white);
-    painter->drawText(QRectF(-42, 38, 84, 12), Qt::AlignCenter,
+    painter->drawText(QRectF(-38, 29, 76, 10), Qt::AlignCenter,
                       QStringLiteral("%1星 血%2 攻%3")
                           .arg(m_unit->starLevel())
                           .arg(m_unit->hp())
@@ -178,6 +185,15 @@ QString UnitItem::spriteRelativePathForUnit() const
 int UnitItem::unitId() const
 {
     return m_unit ? m_unit->id() : -1;
+}
+
+void UnitItem::setSelectedActive(bool active)
+{
+    if (m_selectedActive == active) {
+        return;
+    }
+    m_selectedActive = active;
+    update();
 }
 
 void UnitItem::setGridPos(const QPoint& gridPos)
