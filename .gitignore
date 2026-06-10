@@ -23,3 +23,15 @@ cmake-build-*/
 # 日志
 *.log
 *.tmp
+
+# 游戏存档（运行时生成）
+savegame_*.json
+savegame_*.txt
+
+# Python 缓存（如果有辅助脚本）
+__pycache__/
+*.pyc
+
+# 操作系统文件
+Thumbs.db
+.DS_Store
