@@ -14,13 +14,20 @@
 #include <QtMath>
 #include <algorithm>
 #include <array>
+#include <exception>
 #include <limits>
+#include <stdexcept>
 
 namespace {
 constexpr qreal kZGrid = 0.0;
 constexpr qreal kZUnit = 1.0;
 constexpr qreal kZDraggingUnit = 2.0;
+
+std::runtime_error makeRuntimeError(const QString& message)
+{
+    return std::runtime_error(message.toUtf8().constData());
 }
+} // namespace
 
 Game::Game(QObject* parent)
     : QObject(parent)
@@ -45,7 +52,7 @@ Game::Game(QObject* parent)
     , m_cellGap(4.0)
     , m_benchGap(52.0)
 {
-    m_combatTimer->setInterval(250);
+    m_combatTimer->setInterval(300);
     connect(m_combatTimer, &QTimer::timeout,
             this, &Game::updateCombat);
 }
@@ -366,73 +373,72 @@ void Game::saveGame()
 
 void Game::saveGame(int slot)
 {
-    const int normalizedSlot = qBound(1, slot, 3);
-    QFile file(saveFileName(normalizedSlot));
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
-        m_lastResult = QStringLiteral("保存失败。");
-        updateInfoPanel();
-        return;
-    }
-
-    QTextStream out(&file);
-    out << "PLAYER "
-        << m_player.hp() << ' '
-        << m_player.gold() << ' '
-        << m_player.level() << ' '
-        << m_player.populationLimit() << ' '
-        << m_player.currentRound() << ' '
-        << m_player.winStreak() << ' '
-        << m_player.lossStreak() << '\n';
-
-    out << "SHOP";
-    for (const QString& slot : m_shopSlots) {
-        out << '|' << slot;
-    }
-    out << '\n';
-
-    out << "EQUIPMENT";
-    for (const Equipment& equipment : m_equipmentPool) {
-        out << '|' << equipment.name();
-    }
-    out << '\n';
-
-    out << "ACHIEVEMENTS";
-    for (const QString& achievement : m_achievements) {
-        out << '|' << achievement;
-    }
-    out << '\n';
-
-    for (Unit* unit : m_units) {
-        if (!unit || unit->owner() == UnitOwner::EnemyCtrl) {
-            continue;
+    try {
+        const int normalizedSlot = qBound(1, slot, 3);
+        QFile file(saveFileName(normalizedSlot));
+        if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+            throw makeRuntimeError(QStringLiteral("无法打开存档文件。"));
         }
 
-        QString location = QStringLiteral("HIDDEN");
-        QPoint pos = unit->position();
-        if (m_board.isValidPosition(pos) && m_board.getUnitAt(pos) == unit) {
-            location = QStringLiteral("BOARD:%1:%2").arg(pos.x()).arg(pos.y());
-        } else {
-            const int benchSlot = benchIndexOf(unit);
-            if (benchSlot >= 0) {
-                location = QStringLiteral("BENCH:%1").arg(benchSlot);
+        QTextStream out(&file);
+        out << "PLAYER " << m_player.hp() << ' ' << m_player.gold() << ' ' << m_player.level() << ' '
+            << m_player.populationLimit() << ' ' << m_player.currentRound() << ' ' << m_player.winStreak() << ' '
+            << m_player.lossStreak() << '\n';
+
+        out << "SHOP";
+        for (const QString& slot : m_shopSlots) {
+            out << '|' << slot;
+        }
+        out << '\n';
+
+        out << "EQUIPMENT";
+        for (const Equipment& equipment : m_equipmentPool) {
+            out << '|' << equipment.name();
+        }
+        out << '\n';
+
+        out << "ACHIEVEMENTS";
+        for (const QString& achievement : m_achievements) {
+            out << '|' << achievement;
+        }
+        out << '\n';
+
+        for (Unit* unit : m_units) {
+            if (!unit || unit->owner() == UnitOwner::EnemyCtrl) {
+                continue;
             }
+
+            QString location = QStringLiteral("HIDDEN");
+            QPoint pos = unit->position();
+            if (m_board.isValidPosition(pos) && m_board.getUnitAt(pos) == unit) {
+                location = QStringLiteral("BOARD:%1:%2").arg(pos.x()).arg(pos.y());
+            } else {
+                const int benchSlot = benchIndexOf(unit);
+                if (benchSlot >= 0) {
+                    location = QStringLiteral("BENCH:%1").arg(benchSlot);
+                }
+            }
+
+            out << "UNIT|" << unit->name() << '|' << unit->starLevel() << '|' << qMin(unit->hp(), unit->baseMaxHp())
+                << '|' << unit->baseMaxHp() << '|' << unit->baseAtk() << '|' << unit->baseRange() << '|'
+                << unit->baseMaxMana() << '|' << qMin(unit->mana(), unit->baseMaxMana()) << '|' << location << '\n';
         }
 
-        out << "UNIT|"
-            << unit->name() << '|'
-            << unit->starLevel() << '|'
-            << qMin(unit->hp(), unit->baseMaxHp()) << '|'
-            << unit->baseMaxHp() << '|'
-            << unit->baseAtk() << '|'
-            << unit->baseRange() << '|'
-            << unit->baseMaxMana() << '|'
-            << qMin(unit->mana(), unit->baseMaxMana()) << '|'
-            << location << '\n';
-    }
+        out.flush();
+        if (out.status() != QTextStream::Ok || !file.flush()) {
+            throw makeRuntimeError(QStringLiteral("写入存档文件失败：%1").arg(file.errorString()));
+        }
 
-    m_lastResult = QStringLiteral("已保存到存档 %1。").arg(normalizedSlot);
-    addLog(QStringLiteral("保存游戏到存档 %1。").arg(normalizedSlot));
-    updateInfoPanel();
+        m_lastResult = QStringLiteral("已保存到存档 %1。").arg(normalizedSlot);
+        addLog(QStringLiteral("保存游戏到存档 %1。").arg(normalizedSlot));
+        updateInfoPanel();
+    } catch (const std::exception& error) {
+        m_lastResult = QStringLiteral("保存失败：%1").arg(QString::fromUtf8(error.what()));
+        updateInfoPanel();
+    } catch (...) {
+        m_lastResult = QStringLiteral("保存失败：未知错误。");
+        updateInfoPanel();
+    }
 }
 
 void Game::loadGame()
@@ -442,121 +448,128 @@ void Game::loadGame()
 
 void Game::loadGame(int slot)
 {
-    const int normalizedSlot = qBound(1, slot, 3);
-    QFile file(saveFileName(normalizedSlot));
-    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        m_lastResult = QStringLiteral("没有找到存档 %1。").arg(normalizedSlot);
-        updateInfoPanel();
-        return;
-    }
+    try {
+        const int normalizedSlot = qBound(1, slot, 3);
+        QFile file(saveFileName(normalizedSlot));
+        if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            throw makeRuntimeError(QStringLiteral("没有找到存档 %1。").arg(normalizedSlot));
+        }
 
-    m_combatTimer->stop();
-    m_phase = GamePhase::Prepare;
-    m_board.clear();
-    m_benchSlots.fill(nullptr, m_benchSlotCount);
-    qDeleteAll(m_units);
-    m_units.clear();
-    m_player.clearUnits();
-    m_equipmentPool.clear();
-    m_achievements.clear();
-    m_logs.clear();
-    m_player.setWinStreak(0);
-    m_player.setLossStreak(0);
+        m_combatTimer->stop();
+        m_phase = GamePhase::Prepare;
+        m_board.clear();
+        m_benchSlots.fill(nullptr, m_benchSlotCount);
+        qDeleteAll(m_units);
+        m_units.clear();
+        m_player.clearUnits();
+        m_equipmentPool.clear();
+        m_achievements.clear();
+        m_logs.clear();
+        m_player.setWinStreak(0);
+        m_player.setLossStreak(0);
 
-    QTextStream in(&file);
-    while (!in.atEnd()) {
-        const QString line = in.readLine();
-        if (line.startsWith(QStringLiteral("PLAYER "))) {
-            const QStringList parts = line.split(' ', Qt::SkipEmptyParts);
-            if (parts.size() >= 6) {
-                m_player.setHp(parts.at(1).toInt());
-                m_player.setGold(parts.at(2).toInt());
-                m_player.setLevel(parts.at(3).toInt());
-                m_player.setPopulationLimit(parts.at(4).toInt());
-                m_player.setCurrentRound(parts.at(5).toInt());
-                if (parts.size() >= 8) {
-                    m_player.setWinStreak(parts.at(6).toInt());
-                    m_player.setLossStreak(parts.at(7).toInt());
+        QTextStream in(&file);
+        while (!in.atEnd()) {
+            const QString line = in.readLine();
+            if (line.startsWith(QStringLiteral("PLAYER "))) {
+                const QStringList parts = line.split(' ', Qt::SkipEmptyParts);
+                if (parts.size() >= 6) {
+                    m_player.setHp(parts.at(1).toInt());
+                    m_player.setGold(parts.at(2).toInt());
+                    m_player.setLevel(parts.at(3).toInt());
+                    m_player.setPopulationLimit(parts.at(4).toInt());
+                    m_player.setCurrentRound(parts.at(5).toInt());
+                    if (parts.size() >= 8) {
+                        m_player.setWinStreak(parts.at(6).toInt());
+                        m_player.setLossStreak(parts.at(7).toInt());
+                    }
                 }
-            }
-        } else if (line.startsWith(QStringLiteral("SHOP"))) {
-            const QStringList parts = line.split('|');
-            m_shopSlots.fill(QString(), 5);
-            for (int i = 1; i < parts.size() && i - 1 < m_shopSlots.size(); ++i) {
-                m_shopSlots[i - 1] = parts.at(i);
-            }
-        } else if (line.startsWith(QStringLiteral("EQUIPMENT"))) {
-            const QStringList parts = line.split('|');
-            for (int i = 1; i < parts.size(); ++i) {
-                if (!parts.at(i).isEmpty()) {
-                    m_equipmentPool.append(equipmentFromName(parts.at(i)));
+            } else if (line.startsWith(QStringLiteral("SHOP"))) {
+                const QStringList parts = line.split('|');
+                m_shopSlots.fill(QString(), 5);
+                for (int i = 1; i < parts.size() && i - 1 < m_shopSlots.size(); ++i) {
+                    m_shopSlots[i - 1] = parts.at(i);
                 }
-            }
-        } else if (line.startsWith(QStringLiteral("ACHIEVEMENTS"))) {
-            const QStringList parts = line.split('|');
-            for (int i = 1; i < parts.size(); ++i) {
-                if (!parts.at(i).isEmpty() && !m_achievements.contains(parts.at(i))) {
-                    m_achievements.append(parts.at(i));
+            } else if (line.startsWith(QStringLiteral("EQUIPMENT"))) {
+                const QStringList parts = line.split('|');
+                for (int i = 1; i < parts.size(); ++i) {
+                    if (!parts.at(i).isEmpty()) {
+                        m_equipmentPool.append(equipmentFromName(parts.at(i)));
+                    }
                 }
-            }
-        } else if (line.startsWith(QStringLiteral("UNIT|"))) {
-            const QStringList parts = line.split('|');
-            if (parts.size() < 10) {
-                continue;
-            }
+            } else if (line.startsWith(QStringLiteral("ACHIEVEMENTS"))) {
+                const QStringList parts = line.split('|');
+                for (int i = 1; i < parts.size(); ++i) {
+                    if (!parts.at(i).isEmpty() && !m_achievements.contains(parts.at(i))) {
+                        m_achievements.append(parts.at(i));
+                    }
+                }
+            } else if (line.startsWith(QStringLiteral("UNIT|"))) {
+                const QStringList parts = line.split('|');
+                if (parts.size() < 10) {
+                    continue;
+                }
 
-            Unit* unit = createUnitFromTemplate(parts.at(1), UnitOwner::PlayerCtrl);
-            unit->setStarLevel(parts.at(2).toInt());
-            unit->setHp(parts.at(3).toInt());
-            unit->setMaxHp(parts.at(4).toInt());
-            unit->setAtk(parts.at(5).toInt());
-            unit->setRange(parts.at(6).toInt());
-            unit->setMaxMana(parts.at(7).toInt());
-            unit->setMana(parts.at(8).toInt());
-            m_units.append(unit);
-            m_player.addUnit(unit->id());
+                Unit* unit = createUnitFromTemplate(parts.at(1), UnitOwner::PlayerCtrl);
+                unit->setStarLevel(parts.at(2).toInt());
+                unit->setHp(parts.at(3).toInt());
+                unit->setMaxHp(parts.at(4).toInt());
+                unit->setAtk(parts.at(5).toInt());
+                unit->setRange(parts.at(6).toInt());
+                unit->setMaxMana(parts.at(7).toInt());
+                unit->setMana(parts.at(8).toInt());
+                m_units.append(unit);
+                m_player.addUnit(unit->id());
 
-            const QString location = parts.at(9);
-            if (location.startsWith(QStringLiteral("BOARD:"))) {
-                const QStringList coords = location.split(':');
-                if (coords.size() == 3) {
-                    m_board.addUnit(unit, QPoint(coords.at(1).toInt(), coords.at(2).toInt()));
-                }
-            } else if (location.startsWith(QStringLiteral("BENCH:"))) {
-                const QStringList slotParts = location.split(':');
-                if (slotParts.size() == 2) {
-                    const int slot = slotParts.at(1).toInt();
-                    if (slot >= 0 && slot < m_benchSlots.size()) {
-                        m_benchSlots[slot] = unit;
-                        unit->setPosition(QPoint(slot, Board::ROWS));
+                const QString location = parts.at(9);
+                if (location.startsWith(QStringLiteral("BOARD:"))) {
+                    const QStringList coords = location.split(':');
+                    if (coords.size() == 3) {
+                        m_board.addUnit(unit, QPoint(coords.at(1).toInt(), coords.at(2).toInt()));
+                    }
+                } else if (location.startsWith(QStringLiteral("BENCH:"))) {
+                    const QStringList slotParts = location.split(':');
+                    if (slotParts.size() == 2) {
+                        const int slot = slotParts.at(1).toInt();
+                        if (slot >= 0 && slot < m_benchSlots.size()) {
+                            m_benchSlots[slot] = unit;
+                            unit->setPosition(QPoint(slot, Board::ROWS));
+                        }
                     }
                 }
             }
         }
-    }
 
-    m_eventRewardRound = m_player.currentRound();
-    m_currentEvent = currentEventForRound(m_player.currentRound());
-    generateEnemyRound(m_player.currentRound());
-    const QPoint enemyPositions[] = {
-        QPoint(5, 0),
-        QPoint(6, 0)
-    };
-    int deployedEnemies = 0;
-    for (Unit* unit : m_units) {
-        if (!unit || unit->owner() != UnitOwner::EnemyCtrl || deployedEnemies >= 2) {
-            continue;
+        if (in.status() != QTextStream::Ok) {
+            throw makeRuntimeError(QStringLiteral("读取存档文件失败。"));
         }
-        unit->resetCombatState();
-        m_board.addUnit(unit, enemyPositions[deployedEnemies]);
-        ++deployedEnemies;
-    }
 
-    m_lastResult = QStringLiteral("存档 %1 读取完成。").arg(normalizedSlot);
-    addLog(QStringLiteral("读取存档 %1。").arg(normalizedSlot));
-    checkAchievements();
-    buildScene();
-    syncFromBoard();
+        m_eventRewardRound = m_player.currentRound();
+        m_currentEvent = currentEventForRound(m_player.currentRound());
+        generateEnemyRound(m_player.currentRound());
+        const QPoint enemyPositions[] = {QPoint(5, 0), QPoint(6, 0)};
+        int deployedEnemies = 0;
+        for (Unit* unit : m_units) {
+            if (!unit || unit->owner() != UnitOwner::EnemyCtrl || deployedEnemies >= 2) {
+                continue;
+            }
+            unit->resetCombatState();
+            m_board.addUnit(unit, enemyPositions[deployedEnemies]);
+            ++deployedEnemies;
+        }
+
+        m_lastResult = QStringLiteral("存档 %1 读取完成。").arg(normalizedSlot);
+        addLog(QStringLiteral("读取存档 %1。").arg(normalizedSlot));
+        checkAchievements();
+        buildScene();
+        syncFromBoard();
+    } catch (const std::exception& error) {
+        m_lastResult = QStringLiteral("读取存档失败：%1").arg(QString::fromUtf8(error.what()));
+        updateInfoPanel();
+    } catch (...) {
+        m_lastResult = QStringLiteral("读取存档失败：未知错误。");
+        updateInfoPanel();
+    }
 }
 
 bool Game::hasSaveSlot(int slot) const
@@ -567,7 +580,8 @@ bool Game::hasSaveSlot(int slot) const
 QString Game::saveSlotTimeText(int slot) const
 {
     const QFileInfo info(saveFileName(slot));
-    if (!info.exists()) {
+    if (!info.exists())
+    {
         return QStringLiteral("未保存");
     }
 
@@ -1278,14 +1292,14 @@ void Game::moveUnitToward(Unit* unit, Unit* target)
     const QPoint next = nextStepToward(unit, target);
     if (next == from) {
         unit->setState(UnitState::Idle);
-        unit->setMoveCooldown(3);
+        unit->setMoveCooldown(4);
         return;
     }
 
     m_board.removeUnit(unit);
     m_board.addUnit(unit, next);
     unit->setState(UnitState::Moving);
-    unit->setMoveCooldown(3);
+    unit->setMoveCooldown(4);
 }
 
 void Game::attackTarget(Unit* unit, Unit* target)
@@ -1314,7 +1328,7 @@ void Game::attackTarget(Unit* unit, Unit* target)
 
 void Game::castSkill(Unit* unit, Unit* target)
 {
-    if (!unit || !target) {
+    if (!unit || !target || !unit->skill()) {
         return;
     }
 
@@ -1322,32 +1336,10 @@ void Game::castSkill(Unit* unit, Unit* target)
     unit->setMana(0);
     unit->setAttackCooldown(unit->attackInterval());
 
-    switch (unit->skillType()) {
-    case SkillType::PowerStrike:
-        applyDamage(target, (unit->atk() * 2 + 20) * (100 + unit->traitSkillAmpPercent()) / 100);
-        addLog(QStringLiteral("%1释放强力一击。").arg(unit->name()));
-        break;
-    case SkillType::SelfHeal:
-        unit->setHp(qMin(unit->maxHp(), unit->hp() + 45));
-        addLog(QStringLiteral("%1释放自我治疗。").arg(unit->name()));
-        break;
-    case SkillType::ArcaneBurst: {
-        const QPoint center = target->position();
-        for (Unit* candidate : m_units) {
-            if (!candidate
-                || !candidate->isAlive()
-                || candidate->owner() == unit->owner()) {
-                continue;
-            }
-
-            if (gridDistance(center, candidate->position()) <= 1) {
-                applyDamage(candidate, (unit->atk() + 20) * (100 + unit->traitSkillAmpPercent()) / 100);
-            }
-        }
-        addLog(QStringLiteral("%1释放奥术爆裂。").arg(unit->name()));
-        break;
-    }
-    }
+    unit->skill()->cast(
+        unit, target, m_units, [this](Unit* damagedUnit, int damage) { applyDamage(damagedUnit, damage); },
+        [this](const QPoint& a, const QPoint& b) { return gridDistance(a, b); },
+        [this](const QString& message) { addLog(message); });
 }
 
 void Game::applyDamage(Unit* target, int damage)
@@ -1366,13 +1358,16 @@ void Game::applyDamage(Unit* target, int damage)
 
 bool Game::sideDefeated(UnitOwner owner) const
 {
-    for (Unit* unit : m_units) {
-        if (!unit || unit->owner() != owner || !unit->isAlive()) {
+    for (Unit* unit : m_units)
+    {
+        if (!unit || unit->owner() != owner || !unit->isAlive())
+        {
             continue;
         }
 
         const QPoint pos = unit->position();
-        if (m_board.isValidPosition(pos) && m_board.getUnitAt(pos) == unit) {
+        if (m_board.isValidPosition(pos) && m_board.getUnitAt(pos) == unit)
+        {
             return false;
         }
     }
@@ -1556,15 +1551,8 @@ QString Game::stateName(UnitState state) const
 
 QString Game::skillName(SkillType skillType) const
 {
-    switch (skillType) {
-    case SkillType::PowerStrike:
-        return QStringLiteral("强力一击");
-    case SkillType::SelfHeal:
-        return QStringLiteral("自我治疗");
-    case SkillType::ArcaneBurst:
-        return QStringLiteral("奥术爆裂");
-    }
-    return QStringLiteral("未知");
+    const std::unique_ptr<Skill> skill = createSkill(skillType);
+    return skill ? skill->name() : QStringLiteral("未知");
 }
 
 void Game::buildScene()
@@ -1593,7 +1581,8 @@ void Game::buildScene()
         }
     }
 
-    for (int slot = 0; slot < m_benchSlotCount; ++slot) {
+    for (int slot = 0; slot < m_benchSlotCount; ++slot)
+    {
         GridItem* benchItem = new GridItem(Board::ROWS, slot, benchCellPolygon(slot));
         benchItem->setZValue(kZGrid);
         benchItem->setBaseColor(QColor(58, 78, 62));
@@ -1692,6 +1681,19 @@ void Game::syncFromBoard()
 
         const QPoint pos = item->unit()->position();
         if (!m_board.isValidPosition(pos) || m_board.getUnitAt(pos) != item->unit()) {
+            if (item->unit()->state() == UnitState::Dead && m_board.isValidPosition(pos)) {
+                if (item->deathAnimationFinished()) {
+                    item->setVisible(false);
+                    continue;
+                }
+
+                item->setVisible(true);
+                item->setGridPos(pos);
+                item->setPos(gridToWorld(pos.y(), pos.x()));
+                item->setZValue(kZUnit - 0.1);
+                continue;
+            }
+
             const int benchSlot = benchIndexOf(item->unit());
             if (benchSlot < 0) {
                 item->setVisible(false);

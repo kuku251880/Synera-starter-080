@@ -5,6 +5,8 @@
 #include <QString>
 #include <QStringList>
 #include <QtGlobal>
+#include <memory>
+#include "skill.h"
 
 enum class UnitOwner
 {
@@ -21,23 +23,11 @@ enum class UnitState
     Dead
 };
 
-enum class SkillType
-{
-    PowerStrike,
-    SelfHeal,
-    ArcaneBurst
-};
-
 class Unit
 {
 public:
-    Unit(const QString& name = QString("Unit"),
-         int hp = 100,
-         int atk = 10,
-         int range = 1,
-         int maxMana = 100,
-         UnitOwner owner = UnitOwner::PlayerCtrl,
-         const QStringList& traits = QStringList(),
+    Unit(const QString& name = QString("Unit"), int hp = 100, int atk = 10, int range = 1, int maxMana = 100,
+         UnitOwner owner = UnitOwner::PlayerCtrl, const QStringList& traits = QStringList(),
          SkillType skillType = SkillType::PowerStrike);
     ~Unit() = default;
 
@@ -58,6 +48,7 @@ public:
     QStringList traits() const { return m_traits; }
     UnitState state() const { return m_state; }
     SkillType skillType() const { return m_skillType; }
+    const Skill* skill() const { return m_skill.get(); }
     int attackCooldown() const { return m_attackCooldown; }
     int moveCooldown() const { return m_moveCooldown; }
     int attackInterval() const { return m_attackInterval; }
@@ -79,19 +70,14 @@ public:
     void setOwner(UnitOwner owner) { m_owner = owner; }
     void setTraits(const QStringList& traits) { m_traits = traits; }
     void setState(UnitState state) { m_state = state; }
-    void setSkillType(SkillType skillType) { m_skillType = skillType; }
+    void setSkillType(SkillType skillType);
     void setAttackCooldown(int cooldown) { m_attackCooldown = cooldown; }
     void setMoveCooldown(int cooldown) { m_moveCooldown = cooldown; }
     void setAttackInterval(int interval) { m_attackInterval = interval; }
     void setStarLevel(int starLevel) { m_starLevel = starLevel; }
     void addEquipmentName(const QString& name) { m_equipmentNames.append(name); }
-    void setTraitBonuses(int maxHpBonus,
-                         int atkBonus,
-                         int rangeBonus,
-                         int maxManaBonus,
-                         int manaGainBonus,
-                         int skillAmpPercent,
-                         int extraStrikeChance);
+    void setTraitBonuses(int maxHpBonus, int atkBonus, int rangeBonus, int maxManaBonus, int manaGainBonus,
+                         int skillAmpPercent, int extraStrikeChance);
     void clearTraitBonuses();
     void resetCombatState();
 
@@ -111,6 +97,7 @@ private:
     QStringList m_traits;
     UnitState m_state;
     SkillType m_skillType;
+    std::unique_ptr<Skill> m_skill;
     int m_attackCooldown;
     int m_moveCooldown;
     int m_attackInterval;

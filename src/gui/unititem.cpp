@@ -1,9 +1,11 @@
 #include "gui/unititem.h"
 #include "entity/unit.h"
 #include <QCoreApplication>
+#include <QDir>
 #include <QFileInfo>
 #include <QGraphicsSceneMouseEvent>
 #include <QPainter>
+#include <QTimerEvent>
 
 UnitItem::UnitItem(Unit* unit, QGraphicsItem* parent)
     : QGraphicsObject(parent)
@@ -12,10 +14,13 @@ UnitItem::UnitItem(Unit* unit, QGraphicsItem* parent)
     , m_dragging(false)
     , m_dragEnabled(true)
     , m_selectedActive(false)
+    , m_deathAnimationFinished(false)
+    , m_animationFrameIndex(0)
+    , m_animationTimerId(0)
     , m_dragOffset(0.0, 0.0)
-    , m_spriteTried(false)
 {
     setAcceptedMouseButtons(Qt::LeftButton);
+    m_animationTimerId = startTimer(90);
 }
 
 QRectF UnitItem::boundingRect() const
@@ -27,7 +32,7 @@ void UnitItem::paint(QPainter* painter, const QStyleOptionGraphicsItem*, QWidget
 {
     painter->setRenderHint(QPainter::Antialiasing);
 
-    ensureSpriteLoaded();
+    ensureAnimationLoaded();
 
     if (m_selectedActive) {
         painter->setPen(QPen(QColor(255, 218, 107), 2.5));
@@ -35,9 +40,11 @@ void UnitItem::paint(QPainter* painter, const QStyleOptionGraphicsItem*, QWidget
         painter->drawRoundedRect(QRectF(-43, -53, 86, 103), 6, 6);
     }
 
-    if (!m_sprite.isNull()) {
+    if (!m_animationFrames.isEmpty()) {
         const QRectF targetRect(-40, -40, 80, 80);
-        painter->drawPixmap(targetRect, m_sprite, m_sprite.rect());
+        const int frameIndex = m_animationFrameIndex % m_animationFrames.size();
+        const QPixmap& frame = m_animationFrames.at(frameIndex);
+        painter->drawPixmap(targetRect, frame, frame.rect());
         paintStatusOverlay(painter);
         return;
     }
@@ -114,17 +121,26 @@ void UnitItem::paintStatusOverlay(QPainter* painter) const
                           .arg(m_unit->atk()));
 }
 
-void UnitItem::ensureSpriteLoaded() const
+void UnitItem::ensureAnimationLoaded()
 {
-    if (m_spriteTried) {
+    if (!m_unit) {
         return;
     }
 
-    m_spriteTried = true;
-    const QString relativePath = spriteRelativePathForUnit();
-    if (relativePath.isEmpty()) {
+    const QString relativeDir = animationRelativeDirForUnit();
+    const QString animationKey = m_unit->name()
+        + QStringLiteral("|")
+        + QString::number(static_cast<int>(m_unit->state()))
+        + QStringLiteral("|")
+        + relativeDir;
+    if (m_loadedAnimationKey == animationKey) {
         return;
     }
+
+    m_loadedAnimationKey = animationKey;
+    m_animationFrames.clear();
+    m_animationFrameIndex = 0;
+    m_deathAnimationFinished = false;
 
     const QString appDir = QCoreApplication::applicationDirPath();
     const QString roots[] = {
@@ -132,25 +148,140 @@ void UnitItem::ensureSpriteLoaded() const
         QFileInfo(appDir + "/../..").canonicalFilePath()
     };
 
-    QPixmap pix;
+    auto loadSequence = [&](const QString& dirRelativePath) {
+        if (dirRelativePath.isEmpty()) {
+            return;
+        }
+
+        for (const QString& root : roots) {
+            if (root.isEmpty()) {
+                continue;
+            }
+
+            const QDir dir(root + "/" + dirRelativePath);
+            if (!dir.exists()) {
+                continue;
+            }
+
+            const QStringList files = dir.entryList(QStringList() << QStringLiteral("*.png"),
+                                                    QDir::Files,
+                                                    QDir::Name);
+            for (const QString& fileName : files) {
+                QPixmap pix;
+                pix.load(dir.filePath(fileName));
+                if (!pix.isNull()) {
+                    m_animationFrames.append(pix.scaled(80,
+                                                        80,
+                                                        Qt::KeepAspectRatio,
+                                                        Qt::SmoothTransformation));
+                }
+            }
+
+            if (!m_animationFrames.isEmpty()) {
+                return;
+            }
+        }
+    };
+
+    loadSequence(relativeDir);
+    if (!m_animationFrames.isEmpty()) {
+        return;
+    }
+
+    const QString idleFramePath = idleFrameRelativePathForUnit();
+    if (idleFramePath.isEmpty()) {
+        return;
+    }
+
     for (const QString& root : roots) {
         if (root.isEmpty()) {
             continue;
         }
-        pix.load(root + "/" + relativePath);
+
+        QPixmap pix;
+        pix.load(root + "/" + idleFramePath);
         if (!pix.isNull()) {
-            break;
+            m_animationFrames.append(pix.scaled(80,
+                                                80,
+                                                Qt::KeepAspectRatio,
+                                                Qt::SmoothTransformation));
+            return;
         }
     }
-
-    if (pix.isNull()) {
-        return;
-    }
-
-    m_sprite = pix.scaled(64, 64, Qt::KeepAspectRatio, Qt::SmoothTransformation);
 }
 
-QString UnitItem::spriteRelativePathForUnit() const
+QString UnitItem::animationRelativeDirForUnit() const
+{
+    if (!m_unit) {
+        return QString();
+    }
+
+    const QString name = m_unit->name();
+    const bool reaper = name == QStringLiteral("战士")
+        || name == QStringLiteral("Warrior")
+        || name == QStringLiteral("法师")
+        || name == QStringLiteral("Mage")
+        || name == QStringLiteral("敌方战士")
+        || name == QStringLiteral("Enemy Warrior");
+    const bool satyr = name == QStringLiteral("弓手")
+        || name == QStringLiteral("Archer")
+        || name == QStringLiteral("预备兵")
+        || name == QStringLiteral("Reserve")
+        || name == QStringLiteral("守卫")
+        || name == QStringLiteral("Guard")
+        || name == QStringLiteral("敌方弓手")
+        || name == QStringLiteral("Enemy Archer");
+
+    QString variant;
+    if (name == QStringLiteral("战士") || name == QStringLiteral("Warrior")) {
+        variant = QStringLiteral("Reaper_Man_1");
+    } else if (name == QStringLiteral("法师") || name == QStringLiteral("Mage")) {
+        variant = QStringLiteral("Reaper_Man_2");
+    } else if (name == QStringLiteral("敌方战士") || name == QStringLiteral("Enemy Warrior")) {
+        variant = QStringLiteral("Reaper_Man_3");
+    } else if (name == QStringLiteral("弓手") || name == QStringLiteral("Archer")) {
+        variant = QStringLiteral("Satyr_01");
+    } else if (name == QStringLiteral("预备兵") || name == QStringLiteral("Reserve")) {
+        variant = QStringLiteral("Satyr_02");
+    } else if (name == QStringLiteral("守卫")
+               || name == QStringLiteral("Guard")
+               || name == QStringLiteral("敌方弓手")
+               || name == QStringLiteral("Enemy Archer")) {
+        variant = QStringLiteral("Satyr_03");
+    }
+
+    QString action;
+    switch (m_unit->state()) {
+    case UnitState::Idle:
+        action = QStringLiteral("Idle");
+        break;
+    case UnitState::Moving:
+        action = QStringLiteral("Walking");
+        break;
+    case UnitState::Attacking:
+        action = reaper ? QStringLiteral("Slashing") : QStringLiteral("Attacking");
+        break;
+    case UnitState::Casting:
+        action = reaper ? QStringLiteral("Throwing") : QStringLiteral("Taunt");
+        break;
+    case UnitState::Dead:
+        action = QStringLiteral("Dying");
+        break;
+    }
+
+    if (reaper && !variant.isEmpty()) {
+        return QStringLiteral("assets/craftpix-reaper-man-chibi-2d-game-sprites/%1/PNG/PNG Sequences/%2")
+            .arg(variant, action);
+    }
+    if (satyr && !variant.isEmpty()) {
+        return QStringLiteral("assets/craftpix-satyr-tiny-style-2d-sprites/PNG/%1/PNG Sequences/%2")
+            .arg(variant, action);
+    }
+
+    return QString();
+}
+
+QString UnitItem::idleFrameRelativePathForUnit() const
 {
     if (!m_unit) {
         return QString();
@@ -199,6 +330,33 @@ void UnitItem::setSelectedActive(bool active)
 void UnitItem::setGridPos(const QPoint& gridPos)
 {
     m_gridPos = gridPos;
+}
+
+void UnitItem::timerEvent(QTimerEvent* event)
+{
+    if (event->timerId() != m_animationTimerId) {
+        QGraphicsObject::timerEvent(event);
+        return;
+    }
+
+    if (m_animationFrames.size() > 1 && m_unit && m_unit->state() == UnitState::Dead) {
+        if (m_animationFrameIndex < m_animationFrames.size() - 1) {
+            ++m_animationFrameIndex;
+            update();
+            return;
+        }
+
+        if (!m_deathAnimationFinished) {
+            m_deathAnimationFinished = true;
+            setVisible(false);
+        }
+        return;
+    }
+
+    if (m_animationFrames.size() > 1) {
+        m_animationFrameIndex = (m_animationFrameIndex + 1) % m_animationFrames.size();
+        update();
+    }
 }
 
 void UnitItem::mousePressEvent(QGraphicsSceneMouseEvent* event)
