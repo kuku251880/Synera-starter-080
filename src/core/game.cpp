@@ -597,7 +597,7 @@ Game::Game(QObject* parent)
       m_leftInfoPanel(nullptr), m_infoPanel(nullptr), m_combatTimer(new QTimer(this)), m_dragActive(false),
       m_activeUnitId(-1), m_selectedUnitId(-1), m_sourceGrid(-1, -1), m_phase(GamePhase::Prepare),
       m_lastResult(QStringLiteral("请布置你的阵容。")), m_currentEvent(QStringLiteral("无")), m_eventRewardRound(0),
-      m_rows(Board::ROWS), m_cols(Board::COLS), m_benchSlotCount(GameConstants::kBenchSlotCount), m_cellSize(GameConstants::kCellSize), m_cellGap(GameConstants::kCellGap), m_benchGap(GameConstants::kBenchGap)
+      m_rows(Board::ROWS), m_benchSlotCount(GameConstants::kBenchSlotCount), m_cellSize(GameConstants::kCellSize), m_cellGap(GameConstants::kCellGap), m_benchGap(GameConstants::kBenchGap)
 {
     m_combatTimer->setInterval(GameConstants::kCombatTickIntervalMs);
     connect(m_combatTimer, &QTimer::timeout, this, &Game::updateCombat);
@@ -1400,9 +1400,7 @@ QString Game::unitInfoForName(const QString& name) const
         parts << QStringLiteral("攻击:%1").arg(unitTemplate.atk);
         parts << QStringLiteral("射程:%1").arg(unitTemplate.range);
         parts << QStringLiteral("法力:%1").arg(unitTemplate.maxMana);
-        const std::unique_ptr<Skill> skill = createSkill(unitTemplate.skillType);
-        const QString skillName = skill ? skill->name() : QStringLiteral("未知");
-        parts << QStringLiteral("技能:%1").arg(skillName);
+        parts << QStringLiteral("技能:%1").arg(skillName(unitTemplate.skillType));
         parts << QStringLiteral("羁绊:%1").arg(unitTemplate.traits.join(QLatin1Char('/')));
         parts << QStringLiteral("购买:%1金").arg(GameConstants::kUnitCost);
         return parts.join(QStringLiteral("  "));
@@ -2265,8 +2263,15 @@ QString Game::stateName(UnitState state) const
 
 QString Game::skillName(SkillType skillType) const
 {
-    const std::unique_ptr<Skill> skill = createSkill(skillType);
-    return skill ? skill->name() : QStringLiteral("未知");
+    switch (skillType) {
+    case SkillType::PowerStrike:
+        return QStringLiteral("强力一击");
+    case SkillType::SelfHeal:
+        return QStringLiteral("自我治疗");
+    case SkillType::ArcaneBurst:
+        return QStringLiteral("奥术爆裂");
+    }
+    return QStringLiteral("未知");
 }
 
 void Game::buildScene()
@@ -2514,8 +2519,9 @@ void Game::updateInfoPanel()
         const QString slotText =
             unitName.isEmpty()
                 ? QStringLiteral("<span style='color:#8f96a3;'>已售出</span>")
-                : QStringLiteral("<span style='color:#f2f4f8;'>%1</span> <span style='color:#ffd36a;'>3金</span>")
-                      .arg(safe(unitName));
+               : QStringLiteral("<span style='color:#f2f4f8;'>%1</span> <span style='color:#ffd36a;'>%2金</span>")
+                      .arg(safe(unitName))
+                      .arg(GameConstants::kUnitCost);
         shopRows << QStringLiteral("<tr><td width='22' style='color:#9fa6b2;'>%1.</td>"
                                    "<td style='padding:2px 0;'>%2</td></tr>")
                         .arg(i + 1)

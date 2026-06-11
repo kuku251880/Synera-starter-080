@@ -117,6 +117,7 @@ void GameWindow::onSellButtonClicked()
 {
     if (m_game) {
         m_game->sellSelectedUnit();
+        fitSceneInView();
     }
 }
 
@@ -360,8 +361,8 @@ void GameWindow::showShopDialog()
     shopLayout->setContentsMargins(0, 6, 0, 0);
     shopLayout->setSpacing(12);
     QVector<QToolButton*> buyButtons;
-    buyButtons.reserve(5);
-    for (int i = 0; i < 5; ++i) {
+    buyButtons.reserve(GameConstants::kShopSlotCount);
+    for (int i = 0; i < GameConstants::kShopSlotCount; ++i) {
         QToolButton* buyButton = new QToolButton(&dialog);
         buyButton->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
         buyButton->setIconSize(QSize(112, 112));
@@ -393,18 +394,22 @@ void GameWindow::showShopDialog()
                 continue;
             }
 
-            const bool canAfford = m_game->playerGold() >= 3;
+            const bool canAfford = m_game->playerGold() >= GameConstants::kUnitCost;
             const QPixmap pixmap = loadShopPixmap(unitName);
             button->setIcon(pixmap.isNull()
                                 ? QIcon()
                                 : QIcon(pixmap.scaled(128, 128, Qt::KeepAspectRatio, Qt::SmoothTransformation)));
             button->setText(canAfford ? QStringLiteral("%1\n价格：3金币").arg(unitName)
                                       : QStringLiteral("%1\n价格：3金币\n金币不足").arg(unitName));
-            button->setToolTip(canAfford ? QStringLiteral("购买%1").arg(unitName)
-                                         : QStringLiteral("金币不足，无法购买%1").arg(unitName));
+           button->setToolTip(canAfford ? QStringLiteral("购买%1").arg(unitName)
+                                        : QStringLiteral("金币不足，无法购买%1").arg(unitName));
+            const QString unitInfo = m_game->unitInfoForName(unitName);
+            if (!unitInfo.isEmpty()) {
+                button->setToolTip(unitInfo);
+            }
             button->setEnabled(canAfford);
         }
-        const bool canRefresh = m_game->playerGold() >= 2;
+        const bool canRefresh = m_game->playerGold() >= GameConstants::kRerollCost;
         refreshButton->setText(canRefresh ? QStringLiteral("刷新(2金)") : QStringLiteral("刷新(2金不足)"));
         refreshButton->setToolTip(canRefresh ? QStringLiteral("花费2金币刷新商店")
                                              : QStringLiteral("金币不足，无法刷新商店"));
@@ -423,7 +428,6 @@ void GameWindow::showShopDialog()
     };
     for (int i = 0; i < buyButtons.size(); ++i) {
         const int btnIdx = i;
-        buyButtons.at(i)->installEventFilter(&dialog);
         connect(buyButtons.at(i), &QPushButton::pressed, &dialog, [btnIdx, &updateDetail]() {
             updateDetail(btnIdx);
         });
