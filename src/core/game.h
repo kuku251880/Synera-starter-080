@@ -153,6 +153,7 @@ private:
     QStringList unitPool() const;
     void rollShop();
     int firstEmptyBenchSlot() const;
+    bool addUnitToBench(Unit* unit);
     void tryMergeUnits();
     void upgradeUnitStar(Unit* unit);
     QHash<QString, int> traitCounts() const;
