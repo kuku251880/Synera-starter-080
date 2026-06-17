@@ -115,19 +115,6 @@ SkillType skillTypeFromKey(const QString& key, SkillType fallback)
     return fallback;
 }
 
-struct UnitTemplate
-{
-    QString name;
-    QStringList aliases;
-    int hp;
-    int atk;
-    int range;
-    int maxMana;
-    QStringList traits;
-    SkillType skillType;
-    bool shopAvailable;
-};
-
 struct TraitThreshold
 {
     int count;
@@ -174,75 +161,6 @@ struct EnemyRoundTemplate
     int eliteAtkBonus;
 };
 
-QVector<UnitTemplate> defaultUnitTemplates()
-{
-    return {
-        {QStringLiteral("战士"),
-         {QStringLiteral("Warrior")},
-         120,
-         14,
-         1,
-         80,
-         {QStringLiteral("前排"), QStringLiteral("人类")},
-         SkillType::PowerStrike,
-         true},
-        {QStringLiteral("弓手"),
-         {QStringLiteral("Archer")},
-         80,
-         18,
-         3,
-         60,
-         {QStringLiteral("游侠"), QStringLiteral("人类")},
-         SkillType::PowerStrike,
-         true},
-        {QStringLiteral("法师"),
-         {QStringLiteral("Mage")},
-         70,
-         22,
-         3,
-         100,
-         {QStringLiteral("奥术"), QStringLiteral("人类")},
-         SkillType::ArcaneBurst,
-         true},
-        {QStringLiteral("预备兵"),
-         {QStringLiteral("Reserve")},
-         95,
-         12,
-         1,
-         70,
-         {QStringLiteral("前排"), QStringLiteral("游侠")},
-         SkillType::SelfHeal,
-         true},
-        {QStringLiteral("守卫"),
-         {QStringLiteral("Guard")},
-         140,
-         10,
-         1,
-         90,
-         {QStringLiteral("前排"), QStringLiteral("奥术")},
-         SkillType::SelfHeal,
-         true},
-        {QStringLiteral("敌方战士"),
-         {QStringLiteral("Enemy Warrior")},
-         120,
-         15,
-         1,
-         80,
-         {QStringLiteral("前排"), QStringLiteral("敌人")},
-         SkillType::PowerStrike,
-         false},
-        {QStringLiteral("敌方弓手"),
-         {QStringLiteral("Enemy Archer")},
-         85,
-         18,
-         3,
-         60,
-         {QStringLiteral("游侠"), QStringLiteral("敌人")},
-         SkillType::ArcaneBurst,
-         false},
-    };
-}
-
 QString projectRelativeFilePath(const QString& relativePath)
 {
     const QString appDir = QCoreApplication::applicationDirPath();
@@ -263,56 +181,6 @@ QString projectRelativeFilePath(const QString& relativePath)
         }
     }
     return QString();
-}
-
-QVector<UnitTemplate> loadUnitTemplates()
-{
-    const QString path = projectRelativeFilePath(QStringLiteral("data/units.json"));
-    if (path.isEmpty()) {
-        return defaultUnitTemplates();
-    }
-
-    QFile file(path);
-    if (!file.open(QIODevice::ReadOnly)) {
-        return defaultUnitTemplates();
-    }
-
-    QJsonParseError parseError;
-    const QJsonDocument document = QJsonDocument::fromJson(file.readAll(), &parseError);
-    if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
-        return defaultUnitTemplates();
-    }
-
-    QVector<UnitTemplate> templates;
-    const QJsonArray units = document.object().value(QStringLiteral("units")).toArray();
-    for (const QJsonValue& value : units) {
-        const QJsonObject object = value.toObject();
-        const QString name = object.value(QStringLiteral("name")).toString();
-        if (name.isEmpty()) {
-            continue;
-        }
-
-        UnitTemplate unitTemplate;
-        unitTemplate.name = name;
-        unitTemplate.aliases = jsonArrayToStringList(object.value(QStringLiteral("aliases")).toArray());
-        unitTemplate.hp = object.value(QStringLiteral("hp")).toInt(100);
-        unitTemplate.atk = object.value(QStringLiteral("atk")).toInt(10);
-        unitTemplate.range = object.value(QStringLiteral("range")).toInt(1);
-        unitTemplate.maxMana = object.value(QStringLiteral("maxMana")).toInt(100);
-        unitTemplate.traits = jsonArrayToStringList(object.value(QStringLiteral("traits")).toArray());
-        unitTemplate.skillType =
-            skillTypeFromKey(object.value(QStringLiteral("skillType")).toString(), SkillType::PowerStrike);
-        unitTemplate.shopAvailable = object.value(QStringLiteral("shopAvailable")).toBool(true);
-        templates.append(unitTemplate);
-    }
-
-    return templates.isEmpty() ? defaultUnitTemplates() : templates;
-}
-
-const QVector<UnitTemplate>& unitTemplates()
-{
-    static const QVector<UnitTemplate> templates = loadUnitTemplates();
-    return templates;
 }
 
 QVector<TraitRule> defaultTraitRules()
@@ -1524,32 +1392,34 @@ void Game::createStarterUnitsIfNeeded()
 
 Unit* Game::createUnitFromTemplate(const QString& name, UnitOwner owner) const
 {
-    for (const UnitTemplate& unitTemplate : unitTemplates()) {
-        if (name != unitTemplate.name && !unitTemplate.aliases.contains(name)) {
-            continue;
-        }
-
-        return new Unit(unitTemplate.name, unitTemplate.hp, unitTemplate.atk, unitTemplate.range, unitTemplate.maxMana,
-                        owner, unitTemplate.traits, unitTemplate.skillType);
-    }
-
-    return new Unit(name, 100, 10, 1, 100, owner, {QStringLiteral("普通")}, SkillType::PowerStrike);
+    return Unit::create(name, owner);
 }
 
 QString Game::unitInfoForName(const QString& name) const
 {
-    for (const UnitTemplate& unitTemplate : unitTemplates()) {
-        if (name != unitTemplate.name && !unitTemplate.aliases.contains(name)) {
-            continue;
+    // Build a temporary Unit via the factory to read stats; never added to the game.
+    std::unique_ptr<Unit> probe(Unit::create(name, UnitOwner::PlayerCtrl));
+    if (!probe || probe->name() != name) {
+        // Fallback: check if the name matches a subtype that changes its display name
+        for (const QString& candidate : {
+                 QStringLiteral("战士"), QStringLiteral("弓手"), QStringLiteral("法师"),
+                 QStringLiteral("预备兵"), QStringLiteral("守卫"),
+                 QStringLiteral("敌方战士"), QStringLiteral("敌方弓手")
+             }) {
+            probe.reset(Unit::create(candidate, UnitOwner::PlayerCtrl));
+            if (probe && probe->name() == name) break;
+            if (probe && probe->typeName() == name) break;
         }
+    }
 
+    if (probe) {
         QStringList parts;
-        parts << QStringLiteral("生命:%1").arg(unitTemplate.hp);
-        parts << QStringLiteral("攻击:%1").arg(unitTemplate.atk);
-        parts << QStringLiteral("射程:%1").arg(unitTemplate.range);
-        parts << QStringLiteral("法力:%1").arg(unitTemplate.maxMana);
-        parts << QStringLiteral("技能:%1").arg(skillName(unitTemplate.skillType));
-        parts << QStringLiteral("羁绊:%1").arg(unitTemplate.traits.join(QLatin1Char('/')));
+        parts << QStringLiteral("生命:%1").arg(probe->baseMaxHp());
+        parts << QStringLiteral("攻击:%1").arg(probe->baseAtk());
+        parts << QStringLiteral("射程:%1").arg(probe->baseRange());
+        parts << QStringLiteral("法力:%1").arg(probe->baseMaxMana());
+        parts << QStringLiteral("技能:%1").arg(skillName(probe->skillType()));
+        parts << QStringLiteral("羁绊:%1").arg(probe->traits().join(QLatin1Char('/')));
         parts << QStringLiteral("购买:%1金").arg(GameConstants::kUnitCost);
         return parts.join(QStringLiteral("  "));
     }
@@ -1558,13 +1428,13 @@ QString Game::unitInfoForName(const QString& name) const
 
 QStringList Game::unitPool() const
 {
-    QStringList pool;
-    for (const UnitTemplate& unitTemplate : unitTemplates()) {
-        if (unitTemplate.shopAvailable) {
-            pool.append(unitTemplate.name);
-        }
-    }
-    return pool;
+    return {
+        QStringLiteral("战士"),
+        QStringLiteral("弓手"),
+        QStringLiteral("法师"),
+        QStringLiteral("预备兵"),
+        QStringLiteral("守卫"),
+    };
 }
 
 void Game::rollShop()

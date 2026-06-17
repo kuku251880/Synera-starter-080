@@ -46,3 +46,79 @@ void Unit::resetCombatState()
     m_attackCooldown = 0;
     m_moveCooldown = 0;
 }
+
+// ─── Subclass constructors ───────────────────────────────────────
+
+WarriorUnit::WarriorUnit(UnitOwner owner)
+    : Unit(QStringLiteral("战士"), 120, 14, 1, 80, owner,
+           {QStringLiteral("前排"), QStringLiteral("人类")}, SkillType::PowerStrike)
+{
+}
+
+ArcherUnit::ArcherUnit(UnitOwner owner)
+    : Unit(QStringLiteral("弓手"), 80, 18, 3, 60, owner,
+           {QStringLiteral("游侠"), QStringLiteral("人类")}, SkillType::PowerStrike)
+{
+}
+
+MageUnit::MageUnit(UnitOwner owner)
+    : Unit(QStringLiteral("法师"), 70, 22, 3, 100, owner,
+           {QStringLiteral("奥术"), QStringLiteral("人类")}, SkillType::ArcaneBurst)
+{
+}
+
+ReserveUnit::ReserveUnit(UnitOwner owner)
+    : Unit(QStringLiteral("预备兵"), 95, 12, 1, 70, owner,
+           {QStringLiteral("前排"), QStringLiteral("游侠")}, SkillType::SelfHeal)
+{
+}
+
+GuardUnit::GuardUnit(UnitOwner owner)
+    : Unit(QStringLiteral("守卫"), 140, 10, 1, 90, owner,
+           {QStringLiteral("前排"), QStringLiteral("奥术")}, SkillType::SelfHeal)
+{
+}
+
+EnemyWarriorUnit::EnemyWarriorUnit()
+    : WarriorUnit(UnitOwner::EnemyCtrl)
+{
+    setName(QStringLiteral("敌方战士"));
+    setTraits({QStringLiteral("前排"), QStringLiteral("敌人")});
+}
+
+EnemyArcherUnit::EnemyArcherUnit()
+    : Unit(QStringLiteral("敌方弓手"), 85, 18, 3, 60, UnitOwner::EnemyCtrl,
+           {QStringLiteral("游侠"), QStringLiteral("敌人")}, SkillType::ArcaneBurst)
+{
+}
+
+// ─── Factory ─────────────────────────────────────────────────────
+
+Unit* Unit::create(const QString& typeName, UnitOwner owner)
+{
+    // Player units
+    if (typeName == QStringLiteral("战士") || typeName == QStringLiteral("Warrior")) {
+        return new WarriorUnit(owner);
+    }
+    if (typeName == QStringLiteral("弓手") || typeName == QStringLiteral("Archer")) {
+        return new ArcherUnit(owner);
+    }
+    if (typeName == QStringLiteral("法师") || typeName == QStringLiteral("Mage")) {
+        return new MageUnit(owner);
+    }
+    if (typeName == QStringLiteral("预备兵") || typeName == QStringLiteral("Reserve")) {
+        return new ReserveUnit(owner);
+    }
+    if (typeName == QStringLiteral("守卫") || typeName == QStringLiteral("Guard")) {
+        return new GuardUnit(owner);
+    }
+    // Enemy units
+    if (typeName == QStringLiteral("敌方战士") || typeName == QStringLiteral("Enemy Warrior")) {
+        return new EnemyWarriorUnit();
+    }
+    if (typeName == QStringLiteral("敌方弓手") || typeName == QStringLiteral("Enemy Archer")) {
+        return new EnemyArcherUnit();
+    }
+    // Fallback
+    return new Unit(typeName, 100, 10, 1, 100, owner, {QStringLiteral("普通")}, SkillType::PowerStrike);
+}

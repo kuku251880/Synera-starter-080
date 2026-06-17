@@ -26,10 +26,15 @@ enum class UnitState
 class Unit
 {
 public:
-    Unit(const QString& name = QString("Unit"), int hp = 100, int atk = 10, int range = 1, int maxMana = 100,
-         UnitOwner owner = UnitOwner::PlayerCtrl, const QStringList& traits = QStringList(),
-         SkillType skillType = SkillType::PowerStrike);
-    ~Unit() = default;
+    Unit(const QString& name, int hp, int atk, int range, int maxMana,
+         UnitOwner owner, const QStringList& traits, SkillType skillType);
+    virtual ~Unit() = default;
+
+    // Factory: create the correct subclass from a unit-type name
+    static Unit* create(const QString& typeName, UnitOwner owner);
+
+    // Virtual identity — overridden by subclasses to report their canonical type
+    virtual QString typeName() const { return m_name; }
 
     int id() const { return m_id; }
     QString name() const { return m_name; }
@@ -81,7 +86,7 @@ public:
     void clearTraitBonuses();
     void resetCombatState();
 
-private:
+protected:
     static int s_nextId;
 
     int m_id;
@@ -110,6 +115,55 @@ private:
     int m_traitManaGainBonus;
     int m_traitSkillAmpPercent;
     int m_traitExtraStrikeChance;
+};
+
+class WarriorUnit : public Unit
+{
+public:
+    explicit WarriorUnit(UnitOwner owner = UnitOwner::PlayerCtrl);
+    QString typeName() const override { return QStringLiteral("战士"); }
+};
+
+class ArcherUnit : public Unit
+{
+public:
+    explicit ArcherUnit(UnitOwner owner = UnitOwner::PlayerCtrl);
+    QString typeName() const override { return QStringLiteral("弓手"); }
+};
+
+class MageUnit : public Unit
+{
+public:
+    explicit MageUnit(UnitOwner owner = UnitOwner::PlayerCtrl);
+    QString typeName() const override { return QStringLiteral("法师"); }
+};
+
+class ReserveUnit : public Unit
+{
+public:
+    explicit ReserveUnit(UnitOwner owner = UnitOwner::PlayerCtrl);
+    QString typeName() const override { return QStringLiteral("预备兵"); }
+};
+
+class GuardUnit : public Unit
+{
+public:
+    explicit GuardUnit(UnitOwner owner = UnitOwner::PlayerCtrl);
+    QString typeName() const override { return QStringLiteral("守卫"); }
+};
+
+class EnemyWarriorUnit : public WarriorUnit
+{
+public:
+    explicit EnemyWarriorUnit();
+    QString typeName() const override { return QStringLiteral("敌方战士"); }
+};
+
+class EnemyArcherUnit : public Unit
+{
+public:
+    explicit EnemyArcherUnit();
+    QString typeName() const override { return QStringLiteral("敌方弓手"); }
 };
 
 #endif // UNIT_H
