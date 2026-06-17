@@ -1,17 +1,21 @@
 #include "gui/unititem.h"
+#include <QCursor>
 #include "entity/unit.h"
 #include <QCoreApplication>
 #include <QDir>
+#include <QEasingCurve>
 #include <QFileInfo>
 #include <QGraphicsSceneMouseEvent>
 #include <QHash>
 #include <QPainter>
+#include <QPointer>
+#include <QTimer>
 #include <QTimerEvent>
 
 UnitItem::UnitItem(Unit* unit, QGraphicsItem* parent)
     : QGraphicsObject(parent), m_unit(unit), m_gridPos(-1, -1), m_dragging(false), m_dragEnabled(true),
       m_selectedActive(false), m_deathAnimationFinished(false), m_animationFrameIndex(0), m_animationTimerId(0),
-      m_dragOffset(0.0, 0.0)
+      m_dragOffset(0.0, 0.0), m_moveAnimation(nullptr)
 {
     setAcceptedMouseButtons(Qt::LeftButton);
     m_animationTimerId = startTimer(90);
@@ -80,7 +84,7 @@ void UnitItem::paintStatusOverlay(QPainter* painter) const
     const QColor hpColor = m_unit->owner() == UnitOwner::PlayerCtrl ? QColor(70, 205, 92) : QColor(230, 92, 92);
 
     const qreal barWidth = 56.0;
-    const qreal barHeight = 4.0;
+    const qreal barHeight = 6.0;
     const QRectF hpBack(-28, -35, barWidth, barHeight);
     const QRectF manaBack(-28, -29, barWidth, barHeight);
     const qreal hpRatio = qBound(0.0, static_cast<qreal>(m_unit->hp()) / qMax(1, m_unit->maxHp()), 1.0);
@@ -342,6 +346,20 @@ void UnitItem::timerEvent(QTimerEvent* event)
     }
 }
 
+void UnitItem::hoverEnterEvent(QGraphicsSceneHoverEvent* event)
+{
+    if (m_dragEnabled) {
+        setCursor(QCursor(Qt::OpenHandCursor));
+    }
+    QGraphicsObject::hoverEnterEvent(event);
+}
+
+void UnitItem::hoverLeaveEvent(QGraphicsSceneHoverEvent* event)
+{
+    setCursor(QCursor(Qt::ArrowCursor));
+    QGraphicsObject::hoverLeaveEvent(event);
+}
+
 void UnitItem::mousePressEvent(QGraphicsSceneMouseEvent* event)
 {
     if (event->button() != Qt::LeftButton) {
@@ -386,4 +404,52 @@ void UnitItem::mouseReleaseEvent(QGraphicsSceneMouseEvent* event)
     setOpacity(1.0);
     emit dragDropped(unitId(), m_gridPos, event->scenePos());
     event->accept();
+}
+
+void UnitItem::animateMoveTo(const QPointF& scenePos, int durationMs)
+{
+    if (m_dragging) return;
+
+    if (!m_moveAnimation) {
+        m_moveAnimation = new QPropertyAnimation(this, "pos", this);
+        m_moveAnimation->setEasingCurve(QEasingCurve::InOutQuad);
+    }
+
+    m_moveAnimation->stop();
+    m_moveAnimation->setDuration(durationMs);
+    m_moveAnimation->setStartValue(pos());
+    m_moveAnimation->setEndValue(scenePos);
+    m_moveAnimation->start();
+}
+
+void UnitItem::flashAttack()
+{
+    // Brief white pulse: drop opacity for 100ms then restore.
+    // QPointer guards against the UnitItem being deleted before the timer fires.
+    setOpacity(0.6);
+    QPointer<UnitItem> self(this);
+    QTimer::singleShot(100, this, [self]() {
+        if (self && !self->m_dragging) self->setOpacity(1.0);
+    });
+}
+
+void UnitItem::flashDamage()
+{
+    // Red flash: draw a translucent red overlay for 120ms via opacity pulse.
+    // No QGraphicsEffect — safe even if the item is deleted mid-tick.
+    setOpacity(0.4);
+    QPointer<UnitItem> self(this);
+    QTimer::singleShot(120, this, [self]() {
+        if (self && !self->m_dragging) self->setOpacity(1.0);
+    });
+}
+
+void UnitItem::flashHeal()
+{
+    // Green flash: brief opacity pulse.
+    setOpacity(0.4);
+    QPointer<UnitItem> self(this);
+    QTimer::singleShot(200, this, [self]() {
+        if (self && !self->m_dragging) self->setOpacity(1.0);
+    });
 }

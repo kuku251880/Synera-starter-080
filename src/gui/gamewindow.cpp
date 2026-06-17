@@ -84,7 +84,6 @@ GameWindow::GameWindow(QWidget* parent)
       m_shopButton(new QPushButton(QStringLiteral("商店"), this)),
       m_levelUpButton(new QPushButton(QStringLiteral("升级人口"), this)),
       m_equipButton(new QPushButton(QStringLiteral("装备首件"), this)),
-      m_sellButton(new QPushButton(QStringLiteral("出售"), this)),
       m_saveButton(new QPushButton(QStringLiteral("保存"), this)),
       m_loadButton(new QPushButton(QStringLiteral("读取"), this)), m_game(new Game(this))
 {
@@ -113,14 +112,6 @@ void GameWindow::onStartCombatButtonClicked()
     }
 }
 
-void GameWindow::onSellButtonClicked()
-{
-    if (m_game) {
-        m_game->sellSelectedUnit();
-        fitSceneInView();
-    }
-}
-
 void GameWindow::resizeEvent(QResizeEvent* event)
 {
     QMainWindow::resizeEvent(event);
@@ -139,7 +130,6 @@ void GameWindow::setupUI()
     m_shopButton->setToolTip(QStringLiteral("打开商店，查看并购买当前5个角色"));
     m_levelUpButton->setToolTip(QStringLiteral("花费金币提升等级和人口上限"));
     m_equipButton->setToolTip(QStringLiteral("把装备池中的第一件装备给当前选中的己方单位"));
-    m_sellButton->setToolTip(QStringLiteral("出售当前选中的己方单位，获得对应金币"));
     m_saveButton->setToolTip(QStringLiteral("打开存档页面，选择一个槽位保存"));
     m_loadButton->setToolTip(QStringLiteral("打开读档页面，选择一个槽位读取"));
 
@@ -222,7 +212,6 @@ void GameWindow::setupUI()
     actionLayout->addWidget(m_shopButton);
     actionLayout->addWidget(m_levelUpButton);
     actionLayout->addWidget(m_equipButton);
-   actionLayout->addWidget(m_sellButton);
    actionLayout->addStretch();
     actionLayout->addWidget(m_saveButton);
     actionLayout->addWidget(m_loadButton);
@@ -244,7 +233,6 @@ void GameWindow::setupUI()
             m_game->equipSelectedUnit();
         }
     });
-    connect(m_sellButton, &QPushButton::clicked, this, &GameWindow::onSellButtonClicked);
     connect(m_saveButton, &QPushButton::clicked, this, [this]() { showArchiveDialog(false); });
     connect(m_loadButton, &QPushButton::clicked, this, [this]() { showArchiveDialog(true); });
 

@@ -27,6 +27,12 @@ public:
     QString rarityColor() const;
     void applyTo(Unit* unit) const;
 
+    int atkBonus() const;
+    int maxHpBonus() const;
+    int hpBonus() const;
+    int attackIntervalBonus() const;
+    int maxManaBonus() const;
+
 private:
     EquipmentType m_type;
 };

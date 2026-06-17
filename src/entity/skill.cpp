@@ -154,7 +154,8 @@ QString PowerStrikeSkill::name() const
 void PowerStrikeSkill::cast(Unit* caster, Unit* target, const QList<Unit*>&,
                             const std::function<void(Unit*, int)>& applyDamage,
                             const std::function<int(const QPoint&, const QPoint&)>&,
-                            const std::function<void(const QString&)>& addLog) const
+                            const std::function<void(const QString&)>& addLog,
+                            const std::function<void(Unit*)>& flashSkill) const
 {
     if (!caster || !target) {
         return;
@@ -162,6 +163,7 @@ void PowerStrikeSkill::cast(Unit* caster, Unit* target, const QList<Unit*>&,
 
     const SkillConfig& config = skillConfig(type());
     applyDamage(target, amplifiedDamage(caster, caster->atk() * config.attackMultiplier + config.flatDamage));
+    flashSkill(caster);
     addLog(QStringLiteral("%1释放%2。").arg(caster->name(), config.name));
 }
 
@@ -172,7 +174,8 @@ QString SelfHealSkill::name() const
 
 void SelfHealSkill::cast(Unit* caster, Unit*, const QList<Unit*>&, const std::function<void(Unit*, int)>&,
                          const std::function<int(const QPoint&, const QPoint&)>&,
-                         const std::function<void(const QString&)>& addLog) const
+                         const std::function<void(const QString&)>& addLog,
+                         const std::function<void(Unit*)>& flashSkill) const
 {
     if (!caster) {
         return;
@@ -180,6 +183,7 @@ void SelfHealSkill::cast(Unit* caster, Unit*, const QList<Unit*>&, const std::fu
 
     const SkillConfig& config = skillConfig(type());
     caster->setHp(qMin(caster->maxHp(), caster->hp() + config.heal));
+    flashSkill(caster);
     addLog(QStringLiteral("%1释放%2。").arg(caster->name(), config.name));
 }
 
@@ -191,7 +195,8 @@ QString ArcaneBurstSkill::name() const
 void ArcaneBurstSkill::cast(Unit* caster, Unit* target, const QList<Unit*>& units,
                             const std::function<void(Unit*, int)>& applyDamage,
                             const std::function<int(const QPoint&, const QPoint&)>& gridDistance,
-                            const std::function<void(const QString&)>& addLog) const
+                            const std::function<void(const QString&)>& addLog,
+                            const std::function<void(Unit*)>& flashSkill) const
 {
     if (!caster || !target) {
         return;
@@ -209,6 +214,7 @@ void ArcaneBurstSkill::cast(Unit* caster, Unit* target, const QList<Unit*>& unit
                         amplifiedDamage(caster, caster->atk() * config.attackMultiplier + config.flatDamage));
         }
     }
+    flashSkill(caster);
     addLog(QStringLiteral("%1释放%2。").arg(caster->name(), config.name));
 }
 

@@ -1,4 +1,5 @@
 #include "game.h"
+#include "entity/skill.h"
 #include "entity/unit.h"
 #include "gui/griditem.h"
 #include "gui/unititem.h"
@@ -594,7 +595,9 @@ QString logCategoryColor(LogCategory category)
 
 Game::Game(QObject* parent)
     : QObject(parent), m_benchSlots(GameConstants::kBenchSlotCount, nullptr), m_shopSlots(GameConstants::kShopSlotCount), m_scene(new QGraphicsScene(this)),
-      m_leftInfoPanel(nullptr), m_infoPanel(nullptr), m_combatTimer(new QTimer(this)), m_dragActive(false),
+      m_leftInfoPanel(nullptr), m_infoPanel(nullptr), m_combatTimer(new QTimer(this)), m_countdownTimer(nullptr),
+      m_resultTimer(nullptr), m_resultOverlay(nullptr), m_resultText(nullptr),
+      m_countdownOverlay(nullptr), m_countdownText(nullptr), m_countdownValue(0), m_dragActive(false),
       m_activeUnitId(-1), m_selectedUnitId(-1), m_sourceGrid(-1, -1), m_phase(GamePhase::Prepare),
       m_lastResult(QStringLiteral("请布置你的阵容。")), m_currentEvent(QStringLiteral("无")), m_eventRewardRound(0),
       m_rows(Board::ROWS), m_benchSlotCount(GameConstants::kBenchSlotCount), m_cellSize(GameConstants::kCellSize), m_cellGap(GameConstants::kCellGap), m_benchGap(GameConstants::kBenchGap)
@@ -650,24 +653,100 @@ void Game::startCombat()
         return;
     }
 
-    m_phase = GamePhase::Combat;
-    m_lastResult = QStringLiteral("战斗进行中。");
-    addLog(QStringLiteral("第%1轮战斗开始。").arg(m_player.currentRound()));
+    // Reset all combat state, apply traits
     refreshTraitBonuses();
-
     for (Unit* unit : m_units) {
-        if (!unit) {
-            continue;
-        }
-
+        if (!unit) continue;
         if (unit->isAlive() && m_board.isValidPosition(unit->position()) &&
             m_board.getUnitAt(unit->position()) == unit) {
             unit->resetCombatState();
         }
     }
-
     syncFromBoard();
-    m_combatTimer->start();
+
+    // Enter countdown phase instead of jumping straight into combat
+    startCountdown();
+}
+
+void Game::startCountdown()
+{
+    m_phase = GamePhase::PreCombat;
+    m_lastResult = QStringLiteral("准备战斗...");
+    m_countdownValue = 3;
+
+    if (!m_countdownTimer) {
+        m_countdownTimer = new QTimer(this);
+        m_countdownTimer->setSingleShot(false);
+        connect(m_countdownTimer, &QTimer::timeout, this, &Game::tickCountdown);
+    }
+
+    // Show countdown overlay
+    if (!m_countdownOverlay) {
+        const QRectF sceneRect = m_scene->sceneRect();
+        const QRectF overlayRect(sceneRect.left(), sceneRect.top(),
+                                 sceneRect.width(), sceneRect.height());
+        m_countdownOverlay = m_scene->addRect(overlayRect,
+            QPen(Qt::NoPen), QBrush(QColor(0, 0, 0, 120)));
+        m_countdownOverlay->setZValue(5.0);
+
+        QFont countFont;
+        countFont.setPointSize(64);
+        countFont.setBold(true);
+        m_countdownText = m_scene->addText(QString(), countFont);
+        m_countdownText->setDefaultTextColor(QColor(255, 218, 107));
+        m_countdownText->setZValue(5.1);
+    } else {
+        m_countdownOverlay->setVisible(true);
+        m_countdownText->setVisible(true);
+    }
+    tickCountdown();
+
+    m_countdownTimer->start(700); // one tick every 700ms
+}
+
+void Game::tickCountdown()
+{
+    if (!m_countdownOverlay || !m_countdownText) return;
+
+    if (m_countdownValue > 0) {
+        const QString number = QString::number(m_countdownValue);
+        m_countdownText->setPlainText(number);
+        const QRectF sceneRect = m_scene->sceneRect();
+        const QRectF textRect = m_countdownText->boundingRect();
+        m_countdownText->setPos(sceneRect.center().x() - textRect.width() / 2,
+                                 sceneRect.center().y() - textRect.height() / 2);
+
+        // Flash scale effect via font size
+        QFont f = m_countdownText->font();
+        f.setPointSize(64);
+        m_countdownText->setFont(f);
+        m_countdownValue--;
+    } else {
+        // "战斗开始!" flash
+        m_countdownText->setPlainText(QStringLiteral("战斗开始!"));
+        QFont f = m_countdownText->font();
+        f.setPointSize(36);
+        m_countdownText->setFont(f);
+        const QRectF sceneRect = m_scene->sceneRect();
+        const QRectF textRect = m_countdownText->boundingRect();
+        m_countdownText->setPos(sceneRect.center().x() - textRect.width() / 2,
+                                 sceneRect.center().y() - textRect.height() / 2);
+
+        m_countdownTimer->stop();
+
+        // Hide overlay after brief delay, then start combat
+        QTimer::singleShot(400, this, [this]() {
+            if (m_countdownOverlay) {
+                m_countdownOverlay->setVisible(false);
+                m_countdownText->setVisible(false);
+            }
+            m_phase = GamePhase::Combat;
+            m_lastResult = QStringLiteral("战斗进行中。");
+            addLog(QStringLiteral("第%1轮战斗开始。").arg(m_player.currentRound()));
+            updateInfoPanel();
+            m_combatTimer->start();
+        });
+    }
 }
 
 void Game::setupRoundBoard(bool preservePlayerLayout)
@@ -799,11 +878,60 @@ void Game::handleDragMoved(int unitId, const QPoint&, const QPointF& scenePos)
 
     const QPoint target = worldToGrid(scenePos);
     showDropHints(unitId, m_sourceGrid, target);
+
+    // Highlight sell zone when dragging over it
+    if (m_sellZoneItem) {
+        const bool overSellZone = m_sellZoneRect.contains(scenePos);
+        m_sellZoneItem->setBrush(QBrush(overSellZone
+            ? QColor(180, 40, 40, 220)
+            : QColor(60, 25, 25, 180)));
+        m_sellZoneItem->setPen(QPen(overSellZone
+            ? QColor(255, 80, 80)
+            : QColor(180, 60, 60), 2));
+
+        // Update sell zone text with unit price when hovering
+        if (m_sellZoneText) {
+            if (overSellZone) {
+                Unit* draggedUnit = findUnitById(unitId);
+                if (draggedUnit) {
+                    const int price = GameConstants::kUnitCost * draggedUnit->starLevel();
+                    m_sellZoneText->setPlainText(
+                        QStringLiteral("出售 %1 可获得 %2 金币").arg(draggedUnit->name()).arg(price));
+                    const QRectF tr = m_sellZoneText->boundingRect();
+                    m_sellZoneText->setPos(m_sellZoneRect.center().x() - tr.width() / 2,
+                                           m_sellZoneRect.center().y() - tr.height() / 2);
+                }
+            } else {
+                m_sellZoneText->setPlainText(QStringLiteral("将角色拖动到此处来出售"));
+                const QRectF tr = m_sellZoneText->boundingRect();
+                m_sellZoneText->setPos(m_sellZoneRect.center().x() - tr.width() / 2,
+                                       m_sellZoneRect.center().y() - tr.height() / 2);
+            }
+        }
+    }
 }
 
 void Game::handleDropCommand(int unitId, const QPoint&, const QPointF& scenePos)
 {
     if (!m_dragActive) {
+        return;
+    }
+
+    // Sell zone drop: sell the dragged unit
+    if (m_sellZoneRect.contains(scenePos)) {
+        clearGridHighlights();
+
+        UnitItem* item = findUnitItem(m_activeUnitId);
+        if (item) {
+            item->setZValue(kZUnit);
+        }
+
+        m_dragActive = false;
+        m_activeUnitId = -1;
+        m_sourceGrid = QPoint(-1, -1);
+
+        sellSelectedUnit(unitId);
+        syncFromBoard();
         return;
     }
 
@@ -955,13 +1083,14 @@ void Game::equipSelectedUnit()
     syncFromBoard();
 }
 
-void Game::sellSelectedUnit()
+void Game::sellSelectedUnit(int unitId)
 {
     if (m_phase != GamePhase::Prepare) {
         return;
     }
 
-    Unit* unit = findUnitById(m_selectedUnitId);
+    const int targetId = (unitId >= 0) ? unitId : m_selectedUnitId;
+    Unit* unit = findUnitById(targetId);
     if (!unit || unit->owner() != UnitOwner::PlayerCtrl) {
         m_lastResult = QStringLiteral("请先选择一个己方单位来出售。");
         updateInfoPanel();
@@ -1041,13 +1170,32 @@ void Game::saveGame(int slot)
             QJsonObject unitObject;
             unitObject.insert(QStringLiteral("name"), unit->name());
             unitObject.insert(QStringLiteral("starLevel"), unit->starLevel());
-            unitObject.insert(QStringLiteral("hp"), qMin(unit->hp(), unit->baseMaxHp()));
-            unitObject.insert(QStringLiteral("maxHp"), unit->baseMaxHp());
-            unitObject.insert(QStringLiteral("atk"), unit->baseAtk());
-            unitObject.insert(QStringLiteral("range"), unit->baseRange());
-            unitObject.insert(QStringLiteral("maxMana"), unit->baseMaxMana());
-            unitObject.insert(QStringLiteral("mana"), qMin(unit->mana(), unit->baseMaxMana()));
-            unitObject.insert(QStringLiteral("attackInterval"), unit->attackInterval());
+
+            // Compute equipment-free base stats so that equipment can be
+            // cleanly re-applied on load.  Subtracts total equipment bonuses
+            // from the stored base values.
+            int cleanMaxHp = unit->baseMaxHp();
+            int cleanAtk = unit->baseAtk();
+            int cleanRange = unit->baseRange();
+            int cleanMaxMana = unit->baseMaxMana();
+            int cleanAttackInterval = unit->attackInterval();
+            int cleanHp = unit->hp();
+            for (const QString& eqName : unit->equipmentNames()) {
+                Equipment eq = equipmentFromName(eqName);
+                cleanMaxHp -= eq.maxHpBonus();
+                cleanAtk -= eq.atkBonus();
+                cleanMaxMana -= eq.maxManaBonus();
+                cleanAttackInterval -= eq.attackIntervalBonus();
+                cleanHp -= eq.hpBonus();
+            }
+
+            unitObject.insert(QStringLiteral("hp"), qMin(qMax(0, cleanHp), qMax(1, cleanMaxHp)));
+            unitObject.insert(QStringLiteral("maxHp"), qMax(1, cleanMaxHp));
+            unitObject.insert(QStringLiteral("atk"), cleanAtk);
+            unitObject.insert(QStringLiteral("range"), cleanRange);
+            unitObject.insert(QStringLiteral("maxMana"), cleanMaxMana);
+            unitObject.insert(QStringLiteral("mana"), qMin(unit->mana(), qMax(20, cleanMaxMana)));
+            unitObject.insert(QStringLiteral("attackInterval"), qMax(2, cleanAttackInterval));
             unitObject.insert(QStringLiteral("skillType"), skillTypeKey(unit->skillType()));
             unitObject.insert(QStringLiteral("traits"), stringListToJsonArray(unit->traits()));
             unitObject.insert(QStringLiteral("equipmentNames"), stringListToJsonArray(unit->equipmentNames()));
@@ -1202,7 +1350,7 @@ void Game::loadJsonSaveData(const QByteArray& saveData)
         unit->setAttackInterval(unitObject.value(QStringLiteral("attackInterval")).toInt(unit->attackInterval()));
         for (const QString& equipmentName :
              jsonArrayToStringList(unitObject.value(QStringLiteral("equipmentNames")).toArray())) {
-            unit->addEquipmentName(equipmentName);
+            equipmentFromName(equipmentName).applyTo(unit);
         }
 
         m_units.append(unit);
@@ -2018,6 +2166,16 @@ void Game::moveUnitToward(Unit* unit, Unit* target)
     m_board.addUnit(unit, next);
     unit->setState(UnitState::Moving);
     unit->setMoveCooldown(GameConstants::kMoveCooldown);
+
+    // Smooth movement animation
+    {
+        UnitItem* moverItem = findUnitItem(unit->id());
+        if (moverItem) {
+            moverItem->setGridPos(next);
+            const QPointF targetWorld = gridToWorld(next.y(), next.x());
+            moverItem->animateMoveTo(targetWorld, 200);
+        }
+    }
 }
 
 void Game::attackTarget(Unit* unit, Unit* target)
@@ -2032,6 +2190,13 @@ void Game::attackTarget(Unit* unit, Unit* target)
     unit->setState(UnitState::Attacking);
     unit->setAttackCooldown(unit->attackInterval());
     unit->setMana(qMin(unit->maxMana(), unit->mana() + GameConstants::kManaGainPerAttack + unit->traitManaGainBonus()));
+
+    // Visual feedback: attacker flash & target damage flash
+    {
+        UnitItem* attackerItem = findUnitItem(unit->id());
+        if (attackerItem) attackerItem->flashAttack();
+    }
+
     applyDamage(target, unit->atk());
     addLog(QStringLiteral("%1攻击%2，造成%3伤害。").arg(unit->name(), target->name()).arg(unit->atk()));
 
@@ -2053,10 +2218,25 @@ void Game::castSkill(Unit* unit, Unit* target)
     unit->setMana(0);
     unit->setAttackCooldown(unit->attackInterval());
 
+    // Visual feedback: caster flashes bright on skill activation
+    {
+        UnitItem* casterItem = findUnitItem(unit->id());
+        if (casterItem) {
+            casterItem->flashAttack();
+        }
+    }
+
+    // Flash callback for skills
+    auto flashFn = [this](Unit* u) {
+        UnitItem* ui = findUnitItem(u->id());
+        if (ui) ui->flashAttack();
+    };
+
     unit->skill()->cast(
         unit, target, m_units, [this](Unit* damagedUnit, int damage) { applyDamage(damagedUnit, damage); },
         [this](const QPoint& a, const QPoint& b) { return gridDistance(a, b); },
-        [this](const QString& message) { addLog(message); });
+        [this](const QString& message) { addLog(message); },
+        flashFn);
 }
 
 void Game::applyDamage(Unit* target, int damage)
@@ -2066,6 +2246,13 @@ void Game::applyDamage(Unit* target, int damage)
     }
 
     target->setHp(qMax(0, target->hp() - damage));
+
+    // Visual damage flash on target
+    {
+        UnitItem* targetItem = findUnitItem(target->id());
+        if (targetItem) targetItem->flashDamage();
+    }
+
     if (target->hp() <= 0) {
         target->setState(UnitState::Dead);
         addLog(QStringLiteral("%1阵亡。").arg(target->name()));
@@ -2105,15 +2292,15 @@ int Game::streakBonusGold(bool playerWon) const
 void Game::finishCombat(bool playerWon)
 {
     m_combatTimer->stop();
-    m_phase = GamePhase::Resolve;
 
     const int interest = interestGold();
+    Equipment reward;
 
     if (playerWon) {
         m_player.setWinStreak(m_player.winStreak() + 1);
         m_player.setLossStreak(0);
         const int streakBonus = streakBonusGold(true);
-        Equipment reward = randomEquipment();
+        reward = randomEquipment();
         m_player.setGold(m_player.gold() + GameConstants::kVictoryGold + interest + streakBonus);
         m_equipmentPool.append(reward);
         m_lastResult = QStringLiteral("胜利！基础+%1，利息+%2，连胜+%3，掉落%4。")
@@ -2123,10 +2310,7 @@ void Game::finishCombat(bool playerWon)
                            .arg(reward.name());
         addLog(m_lastResult);
         unlockAchievement(QStringLiteral("初战告捷"));
-        m_player.setCurrentRound(m_player.currentRound() + 1);
-        rollShop();
-        m_phase = GamePhase::Prepare;
-        setupRoundBoard(true);
+        showResultOverlay(true);
     } else {
         m_player.setLossStreak(m_player.lossStreak() + 1);
         m_player.setWinStreak(0);
@@ -2138,11 +2322,98 @@ void Game::finishCombat(bool playerWon)
                            .arg(interest)
                            .arg(streakBonus);
         addLog(m_lastResult);
-        m_phase = GamePhase::Prepare;
-        setupRoundBoard(true);
+        showResultOverlay(false);
     }
 
     checkAchievements();
+    syncFromBoard();
+}
+
+void Game::showResultOverlay(bool playerWon)
+{
+    m_phase = GamePhase::PostCombat;
+
+    if (!m_resultOverlay) {
+        const QRectF sceneRect = m_scene->sceneRect();
+        const QRectF overlayRect(sceneRect.left(), sceneRect.top(),
+                                 sceneRect.width(), sceneRect.height());
+        m_resultOverlay = m_scene->addRect(overlayRect,
+            QPen(Qt::NoPen), QBrush(QColor(0, 0, 0, 150)));
+        m_resultOverlay->setZValue(5.0);
+
+        QFont resultFont;
+        resultFont.setPointSize(36);
+        resultFont.setBold(true);
+        m_resultText = m_scene->addText(QString(), resultFont);
+        m_resultText->setZValue(5.1);
+    } else {
+        m_resultOverlay->setVisible(true);
+        m_resultText->setVisible(true);
+    }
+
+    // Build multi-line result display
+    const int interest = interestGold();
+    const int streakBonus = streakBonusGold(playerWon);
+    QStringList lines;
+    if (playerWon) {
+        lines << QStringLiteral("★ 胜利! ★");
+        lines << QStringLiteral("");
+        lines << QStringLiteral("基础奖励  +%1").arg(GameConstants::kVictoryGold);
+        if (interest > 0) lines << QStringLiteral("利息       +%1").arg(interest);
+        if (streakBonus > 0) lines << QStringLiteral("连胜奖金  +%1").arg(streakBonus);
+        lines << QStringLiteral("装备掉落  %1").arg(randomEquipment().name());
+    } else {
+        lines << QStringLiteral("● 失败");
+        lines << QStringLiteral("");
+        lines << QStringLiteral("生命 -%1").arg(GameConstants::kHpLossOnDefeat);
+        lines << QStringLiteral("基础金币  +%1").arg(GameConstants::kLossGold);
+        if (interest > 0) lines << QStringLiteral("利息       +%1").arg(interest);
+        if (streakBonus > 0) lines << QStringLiteral("连败补偿  +%1").arg(streakBonus);
+    }
+
+    const QColor titleColor = playerWon ? QColor(255, 218, 107) : QColor(230, 92, 92);
+    const QColor detailColor(220, 220, 220);
+
+    QString html = QStringLiteral("<div style='text-align:center; font-size:36pt; font-weight:bold; color:%1;'>%2</div>")
+        .arg(titleColor.name(), lines.at(0).toHtmlEscaped());
+    for (int i = 2; i < lines.size(); ++i) {
+        html += QStringLiteral("<div style='text-align:center; color:%1; font-size:16pt; margin-top:2px;'>%2</div>")
+            .arg(detailColor.name(), lines.at(i).toHtmlEscaped());
+    }
+
+    m_resultText->setHtml(html);
+    m_resultText->setTextWidth(0); // auto-width
+    const QRectF sceneRect = m_scene->sceneRect();
+    const QRectF textRect = m_resultText->boundingRect();
+    m_resultText->setPos(sceneRect.center().x() - textRect.width() / 2,
+                         sceneRect.center().y() - textRect.height() / 2);
+
+    // Auto-dismiss after 2.5s
+    if (!m_resultTimer) {
+        m_resultTimer = new QTimer(this);
+        m_resultTimer->setSingleShot(true);
+        connect(m_resultTimer, &QTimer::timeout, this, &Game::dismissResultOverlay);
+    }
+    m_resultTimer->start(2500);
+}
+
+void Game::dismissResultOverlay()
+{
+    if (m_resultOverlay) {
+        m_resultOverlay->setVisible(false);
+        m_resultText->setVisible(false);
+    }
+
+    // Now actually advance the game state
+    // (the finishCombat logic that was deferred)
+    const bool playerWon = m_player.winStreak() > 0;
+
+    if (playerWon) {
+        m_player.setCurrentRound(m_player.currentRound() + 1);
+        rollShop();
+    }
+    m_phase = GamePhase::Prepare;
+    setupRoundBoard(true);
     syncFromBoard();
 }
 
@@ -2236,8 +2507,12 @@ QString Game::phaseName() const
     switch (m_phase) {
     case GamePhase::Prepare:
         return QStringLiteral("准备");
+    case GamePhase::PreCombat:
+        return QStringLiteral("准备战斗");
     case GamePhase::Combat:
         return QStringLiteral("战斗");
+    case GamePhase::PostCombat:
+        return QStringLiteral("战斗结束");
     case GamePhase::Resolve:
         return QStringLiteral("结算");
     }
@@ -2263,15 +2538,8 @@ QString Game::stateName(UnitState state) const
 
 QString Game::skillName(SkillType skillType) const
 {
-    switch (skillType) {
-    case SkillType::PowerStrike:
-        return QStringLiteral("强力一击");
-    case SkillType::SelfHeal:
-        return QStringLiteral("自我治疗");
-    case SkillType::ArcaneBurst:
-        return QStringLiteral("奥术爆裂");
-    }
-    return QStringLiteral("未知");
+    std::unique_ptr<Skill> skill = createSkill(skillType);
+    return skill->name();
 }
 
 void Game::buildScene()
@@ -2279,6 +2547,8 @@ void Game::buildScene()
     m_scene->clear();
     m_leftInfoPanel = nullptr;
     m_infoPanel = nullptr;
+    m_sellZoneItem = nullptr;
+    m_sellZoneText = nullptr;
     m_gridItems.clear();
     m_unitItems.clear();
     m_unitItemById.clear();
@@ -2373,6 +2643,28 @@ void Game::buildScene()
         connect(unitItem, &UnitItem::dragDropped, this, &Game::handleDropCommand);
     }
 
+    // Sell zone: drag-to-sell area aligned with left panel
+    {
+        const qreal pitch = m_cellSize + m_cellGap;
+        const qreal zoneY = leftPanelRect.bottom() + 8 + 3.0 * pitch;
+        m_sellZoneRect = QRectF(leftPanelRect.left(), zoneY, leftPanelRect.width(), 2.0 * pitch);
+        QPen sellPen(QColor(180, 60, 60), 2);
+        QBrush sellBrush(QColor(60, 25, 25, 180));
+        m_sellZoneItem = m_scene->addRect(m_sellZoneRect, sellPen, sellBrush);
+        m_sellZoneItem->setZValue(kZGrid + 0.05);
+
+        QFont sellFont;
+        sellFont.setPointSize(10);
+        sellFont.setBold(false);
+        m_sellZoneText = m_scene->addText(QStringLiteral("将角色拖动到此处来出售"), sellFont);
+        m_sellZoneText->setDefaultTextColor(QColor(200, 100, 100));
+        const QRectF textRect = m_sellZoneText->boundingRect();
+        m_sellZoneText->setPos(m_sellZoneRect.center().x() - textRect.width() / 2,
+                         m_sellZoneRect.center().y() - textRect.height() / 2);
+        m_sellZoneText->setZValue(kZGrid + 0.1);
+        totalBounds = totalBounds.united(m_sellZoneRect);
+    }
+
     m_scene->setSceneRect(totalBounds.adjusted(-40, -40, 40, 40));
 }
 
@@ -2453,7 +2745,7 @@ void Game::updateInfoPanel()
     };
 
     const Unit* selected = findUnitById(m_selectedUnitId);
-    QString selectedHtml = QStringLiteral("<span style='color:#8f96a3;'>未选择单位</span>");
+    QString selectedHtml = QStringLiteral("<span style='color:#8f96a3;'>点击一个己方单位来选中（装备/出售）</span>");
 
     if (selected) {
         const QString ownerText =
@@ -2568,8 +2860,11 @@ void Game::updateInfoPanel()
     const QString phaseColor =
         m_phase == GamePhase::Combat
             ? QStringLiteral("#e0a447")
-            : (m_phase == GamePhase::Resolve ? QStringLiteral("#a78bfa") : QStringLiteral("#58c28d"));
-    const QString resultColor = m_phase == GamePhase::Combat ? QStringLiteral("#f1d18a") : QStringLiteral("#d9dde6");
+            : (m_phase == GamePhase::PreCombat || m_phase == GamePhase::PostCombat
+                   ? QStringLiteral("#a78bfa")
+                   : (m_phase == GamePhase::Resolve ? QStringLiteral("#a78bfa") : QStringLiteral("#58c28d")));
+    const QString resultColor = (m_phase == GamePhase::Combat || m_phase == GamePhase::PreCombat)
+        ? QStringLiteral("#f1d18a") : QStringLiteral("#d9dde6");
 
     const QString globalBody =
         QStringLiteral("<table width='100%' cellspacing='0' cellpadding='0'>"

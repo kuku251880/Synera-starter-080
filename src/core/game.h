@@ -15,10 +15,12 @@
 #include "board.h"
 #include "entity/equipment.h"
 #include "entity/player.h"
+#include "entity/skill.h"
 
 class Unit;
 class QGraphicsScene;
 class QGraphicsTextItem;
+class QGraphicsRectItem;
 class QTimer;
 class GridItem;
 class UnitItem;
@@ -47,7 +49,7 @@ inline constexpr int kStreakThreshold = 2;
 // Combat
 inline constexpr int kCombatTickIntervalMs = 300;
 inline constexpr int kMoveCooldown = 4;
-inline constexpr int kDefaultAttackInterval = 4;
+inline constexpr int kDefaultAttackInterval = 8; // Base attack interval (ticks between attacks)
 inline constexpr int kManaGainPerAttack = 30;
 inline constexpr int kMaxEquipmentPerUnit = 3;
 
@@ -71,7 +73,7 @@ inline constexpr int kLevelUpThreshold = 3;
 inline constexpr int kStreakAchievementThreshold = 3;
 
 // Star-up limits
-inline constexpr int kMaxStarLevel = 2; // 3-star is max, but game only tracks 1->2
+inline constexpr int kMaxStarLevel = 2; // 2-star is max (1→2, three 1-star units merge into one 2-star)
 
 // Progressive level-up cost: level 1->2 costs 6, 2->3 costs 8, etc.
 inline constexpr int levelUpCost(int currentLevel) {
@@ -87,7 +89,9 @@ inline constexpr int kMaxLogCount = 8;
 enum class GamePhase
 {
     Prepare,
+    PreCombat,   // 3-2-1 countdown before battle
     Combat,
+    PostCombat,  // victory/defeat result display
     Resolve
 };
 
@@ -128,7 +132,7 @@ public:
     void loadGame(int slot);
     int levelUpCost() const { return GameConstants::levelUpCost(m_player.level()); }
     bool maxLevelReached() const { return m_player.level() >= GameConstants::kMaxLevel; }
-    void sellSelectedUnit();
+    void sellSelectedUnit(int unitId = -1);
     QString unitInfoForName(const QString& name) const;
     bool hasSaveSlot(int slot) const;
     QString saveSlotTimeText(int slot) const;
@@ -196,6 +200,10 @@ private:
     QString phaseName() const;
     QString stateName(UnitState state) const;
     QString skillName(SkillType skillType) const;
+    void startCountdown();
+    void tickCountdown();
+    void showResultOverlay(bool playerWon);
+    void dismissResultOverlay();
     void buildScene();
     void syncFromBoard();
     void updateInfoPanel();
@@ -217,6 +225,13 @@ private:
     QGraphicsTextItem* m_leftInfoPanel;
     QGraphicsTextItem* m_infoPanel;
     QTimer* m_combatTimer;
+    QTimer* m_countdownTimer;
+    QTimer* m_resultTimer;
+    QGraphicsRectItem* m_resultOverlay;
+    QGraphicsTextItem* m_resultText;
+    QGraphicsRectItem* m_countdownOverlay;
+    QGraphicsTextItem* m_countdownText;
+    int m_countdownValue;
     std::vector<GridItem*> m_gridItems;
     std::vector<UnitItem*> m_unitItems;
 
@@ -230,10 +245,12 @@ private:
     QStringList m_achievements;
     QVector<GameLog> m_logs;
     int m_eventRewardRound;
+    QRectF m_sellZoneRect;
+    QGraphicsRectItem* m_sellZoneItem;
+    QGraphicsTextItem* m_sellZoneText;
     std::unordered_map<int, UnitItem*> m_unitItemById;
 
     int m_rows;
-    int m_cols;
     int m_benchSlotCount;
     qreal m_cellSize;
     qreal m_cellGap;

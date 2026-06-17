@@ -5,10 +5,13 @@
 #include <QPoint>
 #include <QPointF>
 #include <QPixmap>
+#include <QPropertyAnimation>
 #include <QString>
+#include <QTimerEvent>
 #include <QVector>
 
 class Unit;
+class QGraphicsSceneHoverEvent;
 
 class UnitItem : public QGraphicsObject
 {
@@ -28,6 +31,10 @@ public:
     void setDragEnabled(bool enabled) { m_dragEnabled = enabled; }
     void setSelectedActive(bool active);
     bool deathAnimationFinished() const { return m_deathAnimationFinished; }
+    void animateMoveTo(const QPointF& scenePos, int durationMs = 200);
+    void flashAttack();
+    void flashDamage();
+    void flashHeal();
 
 signals:
     void unitSelected(int unitId);
@@ -40,6 +47,8 @@ protected:
     void mousePressEvent(QGraphicsSceneMouseEvent* event) override;
     void mouseMoveEvent(QGraphicsSceneMouseEvent* event) override;
     void mouseReleaseEvent(QGraphicsSceneMouseEvent* event) override;
+    void hoverEnterEvent(QGraphicsSceneHoverEvent* event) override;
+    void hoverLeaveEvent(QGraphicsSceneHoverEvent* event) override;
 
 private:
     void ensureAnimationLoaded();
@@ -59,6 +68,7 @@ private:
     QPointF m_dragOffset;
     mutable QVector<QPixmap> m_animationFrames;
     mutable QString m_loadedAnimationKey;
+    QPropertyAnimation* m_moveAnimation;
 };
 
 #endif // GUI_ITEMS_UNITITEM_H

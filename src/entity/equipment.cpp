@@ -217,6 +217,8 @@ Equipment Equipment::fromName(const QString& name)
             return Equipment(config.type);
         }
     }
+    qWarning("Equipment::fromName: unknown equipment name \"%s\" — falling back to TrainingSword",
+             qPrintable(name));
     return Equipment(EquipmentType::TrainingSword);
 }
 
@@ -238,6 +240,31 @@ QString Equipment::rarity() const
 QString Equipment::rarityColor() const
 {
     return equipmentConfig(m_type).rarityColor;
+}
+
+int Equipment::atkBonus() const
+{
+    return equipmentConfig(m_type).atkBonus;
+}
+
+int Equipment::maxHpBonus() const
+{
+    return equipmentConfig(m_type).maxHpBonus;
+}
+
+int Equipment::hpBonus() const
+{
+    return equipmentConfig(m_type).hpBonus;
+}
+
+int Equipment::attackIntervalBonus() const
+{
+    return equipmentConfig(m_type).attackIntervalBonus;
+}
+
+int Equipment::maxManaBonus() const
+{
+    return equipmentConfig(m_type).maxManaBonus;
 }
 
 void Equipment::applyTo(Unit* unit) const
