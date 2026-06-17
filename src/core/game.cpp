@@ -1,4 +1,4 @@
-#include "game.h"
+﻿#include "game.h"
 #include "entity/skill.h"
 #include "entity/unit.h"
 #include "gui/griditem.h"
@@ -2923,8 +2923,8 @@ void Game::updateInfoPanel()
                                              "%3"
                                              "</body></html>")
                                   .arg(section(QStringLiteral("运营"), economyBody, QStringLiteral("#ffd36a")),
-                                       section(QStringLiteral("选中单位"), selectedHtml, QStringLiteral("#c8b6ff")),
-                                       section(QStringLiteral("最近日志"), logsText, QStringLiteral("#8fd9a2")));
+                                       section(QStringLiteral("最近日志"), logsText, QStringLiteral("#8fd9a2")),
+                                       section(QStringLiteral("选中单位"), selectedHtml, QStringLiteral("#c8b6ff")));
 
     m_leftInfoPanel->setHtml(leftHtml);
     m_infoPanel->setHtml(rightHtml);
