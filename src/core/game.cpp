@@ -497,6 +497,7 @@ void Game::reset()
     m_achievements.clear();
     m_logs.clear();
     m_eventRewardRound = 0;
+    m_selectedUnitId = -1;
     m_player.setHp(GameConstants::kInitialPlayerHp);
     m_player.setGold(GameConstants::kInitialPlayerGold);
     m_player.setLevel(1);
@@ -504,8 +505,17 @@ void Game::reset()
     m_player.setCurrentRound(1);
     m_player.setWinStreak(0);
     m_player.setLossStreak(0);
+
+    qDeleteAll(m_units);
+    m_units.clear();
+    m_player.clearUnits();
+    m_benchSlots.fill(nullptr, m_benchSlotCount);
+
+    createStarterUnitsIfNeeded();
     rollShop();
     setupRoundBoard();
+    buildScene();
+    syncFromBoard();
     addLog(QStringLiteral("新游戏开始。"));
 }
 
@@ -2424,6 +2434,10 @@ void Game::buildScene()
     m_infoPanel = nullptr;
     m_sellZoneItem = nullptr;
     m_sellZoneText = nullptr;
+    m_countdownOverlay = nullptr;
+    m_countdownText = nullptr;
+    m_resultOverlay = nullptr;
+    m_resultText = nullptr;
     m_gridItems.clear();
     m_unitItems.clear();
     m_unitItemById.clear();
