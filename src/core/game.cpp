@@ -1521,10 +1521,10 @@ void Game::upgradeUnitStar(Unit* unit)
         return;
     }
 
-    // Attribute layering: baseMaxHp/baseAtk store the cumulative base value
-    // (template + previous star-ups + equipment), separate from trait bonuses
-    // that are applied as temporary m_traitMaxHpBonus / m_traitAtkBonus.
-    // Star-up scales the base value to preserve the multiplicative growth curve.
+    // 属性分层机制：baseMaxHp/baseAtk 只存储永久累计的基础数值
+    // （包含初始模板 + 之前的升星奖励 + 穿戴的装备属性），这与存放在
+    // 临时口袋 m_traitMaxHpBonus / m_traitAtkBonus 中的“临时羁绊加成”是死死分开的。
+    // 棋子升星时，系统只等比放大这个基础数值，从而完美维持游戏设计的乘法成长曲线。
     unit->setStarLevel(unit->starLevel() + 1);
     unit->setMaxHp(unit->baseMaxHp() * GameConstants::kStarUpFactorNumerator / GameConstants::kStarUpFactorDenominator);
     unit->setHp(unit->baseMaxHp());
@@ -1557,7 +1557,7 @@ void Game::refreshTraitBonuses()
         if (unit) {
             unit->clearTraitBonuses();
         }
-    }
+    }//遍历所有棋子
 
     const QVector<ActiveTraitBonus> activeBonuses = activeTraitBonuses(traitCounts());
     int teamAtkBonus = 0;
@@ -1827,8 +1827,9 @@ void Game::updateCombat()
 {
     if (m_phase != GamePhase::Combat) {
         return;
-    }
+    }//检查是否处于战斗阶段
 
+    //第一次遍历所有棋子：初始化棋子状态
     for (Unit* unit : m_units) {
         if (!unit) {
             continue;
@@ -1842,20 +1843,21 @@ void Game::updateCombat()
         }
     }
 
+    //第二次遍历所有棋子：进行战斗时的状态刷新
     for (Unit* unit : m_units) {
         if (!unit || !unit->isAlive()) {
             continue;
-        }
+        }//排除死掉的棋子
 
         const QPoint pos = unit->position();
         if (!m_board.isValidPosition(pos) || m_board.getUnitAt(pos) != unit) {
-            continue;
+            continue;//检查棋子位置是否合法
         }
 
         Unit* target = nearestEnemyFor(unit);
         if (!target) {
             unit->setState(UnitState::Idle);
-            continue;
+            continue;//寻敌
         }
 
         if (unit->mana() >= unit->maxMana()) {
@@ -1870,7 +1872,7 @@ void Game::updateCombat()
         }
     }
 
-    // Deferred death processing: remove dead units from the board
+    //第三次遍历棋子：清除死亡棋子
     for (Unit* unit : m_units) {
         if (unit && unit->state() == UnitState::Dead) {
             const QPoint pos = unit->position();
@@ -1880,8 +1882,9 @@ void Game::updateCombat()
         }
     }
 
-    syncFromBoard();
+    syncFromBoard();//刷新显示
 
+    //判断胜负方
     if (sideDefeated(UnitOwner::EnemyCtrl)) {
         finishCombat(true);
     } else if (sideDefeated(UnitOwner::PlayerCtrl)) {
@@ -1893,24 +1896,26 @@ Unit* Game::nearestEnemyFor(Unit* unit) const
 {
     if (!unit || !unit->isAlive()) {
         return nullptr;
-    }
+    }//依旧是安全检查，排除自身死去的棋子
 
     Unit* best = nullptr;
     int bestDistance = std::numeric_limits<int>::max();
     int bestHp = std::numeric_limits<int>::max();
 
+    //循环
     for (Unit* candidate : m_units) {
         if (!candidate || !candidate->isAlive() || candidate->owner() == unit->owner()) {
             continue;
-        }
+        }//安全检查，排除找到的死去的棋子或己方的棋子
 
         const QPoint candidatePos = candidate->position();
         if (!m_board.isValidPosition(candidatePos) || m_board.getUnitAt(candidatePos) != candidate) {
-            continue;
+            continue;//判断目标棋子处于合法位置
         }
 
         const int distance = gridDistance(unit, candidate);
-        if (distance < bestDistance || (distance == bestDistance && candidate->hp() < bestHp) ||
+        if (distance < bestDistance ||//条件一：距离更近
+            (distance == bestDistance && candidate->hp() < bestHp) ||//条件二：距离一样但血更少
             (distance == bestDistance && candidate->hp() == bestHp &&
              candidate->position().y() < (best ? best->position().y() : Board::ROWS)) ||
             (distance == bestDistance && candidate->hp() == bestHp && best &&
