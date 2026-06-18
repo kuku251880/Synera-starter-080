@@ -275,10 +275,10 @@ void Equipment::applyTo(Unit* unit) const
 
     const EquipmentConfig& config = equipmentConfig(m_type);
     if (config.atkBonus != 0) {
-        unit->setAtk(unit->atk() + config.atkBonus);
+        unit->setAtk(unit->baseAtk() + config.atkBonus);
     }
     if (config.maxHpBonus != 0) {
-        unit->setMaxHp(unit->maxHp() + config.maxHpBonus);
+        unit->setMaxHp(unit->baseMaxHp() + config.maxHpBonus);
     }
     if (config.hpBonus != 0) {
         unit->setHp(unit->hp() + config.hpBonus);
@@ -287,7 +287,7 @@ void Equipment::applyTo(Unit* unit) const
         unit->setAttackInterval(qMax(2, unit->attackInterval() + config.attackIntervalBonus));
     }
     if (config.maxManaBonus != 0) {
-        unit->setMaxMana(qMax(20, unit->maxMana() + config.maxManaBonus));
+        unit->setMaxMana(qMax(20, unit->baseMaxMana() + config.maxManaBonus));
         unit->setMana(qMin(unit->mana(), unit->maxMana()));
     }
 

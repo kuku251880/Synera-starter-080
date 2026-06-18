@@ -23,6 +23,7 @@ class Unit;
 class QGraphicsScene;
 class QGraphicsTextItem;
 class QGraphicsRectItem;
+class QGraphicsEllipseItem;
 class QTimer;
 class GridItem;
 class UnitItem;
@@ -224,8 +225,10 @@ private:
     // ─── 动态弹窗与视觉倒计时流 ──────────────────────────────────────
     void startCountdown();                       // 启动战前倒计时定时器
     void tickCountdown();                        // 倒计时每走一秒刷新一下屏幕中间的超大数字
-    void showResultOverlay(bool playerWon);      // 战斗刚完时，在画布正中弹出一张巨大的华丽结算卡片
-    void dismissResultOverlay();                 // 2.5秒后自动关闭大结算卡片，正式切回准备阶段
+    void showResultOverlay(bool playerWon, const Equipment& reward = Equipment()); // 战斗刚完时，在画布正中弹出一张巨大的华丽结算卡片
+    void spawnResultParticles(const QRectF& cardRect, bool playerWon); // 生成结算卡片的粒子闪光特效
+    void tickResultAnimation();                  // 结算动画的逐帧驱动
+    void dismissResultOverlay();                 // 2.8秒后自动关闭大结算卡片，正式切回准备阶段
 
     // ─── 屏幕像素坐标（世界）与网格坐标（格子）的转换算法 ───────────────────
     void buildScene();                           // 核心渲染：在画布上画出 8x8 棋盘、备战格子、信息文本面板
@@ -253,13 +256,20 @@ private:
     QTimer* m_combatTimer;                       // 战斗 300ms 循环大时钟
     QTimer* m_countdownTimer;                    // 3-2-1 倒计时的独立时钟
     QTimer* m_resultTimer;                       // 大卡片弹窗停留 2.5秒 的定时器
+    QTimer* m_resultAnimTimer;                   // 结算动画的逐帧计时器
     QGraphicsRectItem* m_resultOverlay;          // 遮罩层：大卡片背后的半透明黑色幕布
     QGraphicsTextItem* m_resultText;             // 卡片里的多行彩色富文本
+    QGraphicsRectItem* m_resultCard;             // 结算卡片背景面板
+    QVector<QGraphicsEllipseItem*> m_resultParticles; // 结算粒子特效
+    int m_resultAnimFrame;                       // 当前动画帧计数
     QGraphicsRectItem* m_countdownOverlay;       // 倒计时半透明幕布
     QGraphicsTextItem* m_countdownText;          // 倒计时中间的大数字图形
     int m_countdownValue;                        // 当前倒计时数值（3，2，1）
     std::vector<GridItem*> m_gridItems;          // 场上 64 块地皮图形的集合
     std::vector<UnitItem*> m_unitItems;          // 场上所有会动的棋子动画图形集合
+
+           // ─── 战斗前布局快照 ────────────────────────────────────────────
+    QHash<int, QPoint> m_preCombatPositions;     // 战斗开始时所有玩家单位的棋盘/备战区位置快照
 
            // ─── 局内状态标记 ──────────────────────────────────────────────
     bool m_dragActive;                           // 标记玩家现在是不是正用鼠标按着某个棋子在空中拖拽

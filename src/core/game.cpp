@@ -10,6 +10,7 @@
 #include <QFileDevice>
 #include <QFileInfo>
 #include <QGraphicsRectItem>
+#include <QGraphicsEllipseItem>
 #include <QGraphicsScene>
 #include <QGraphicsTextItem>
 #include <QJsonArray>
@@ -464,7 +465,7 @@ QString logCategoryColor(LogCategory category)
 Game::Game(QObject* parent)
     : QObject(parent), m_benchSlots(GameConstants::kBenchSlotCount, nullptr), m_shopSlots(GameConstants::kShopSlotCount), m_scene(new QGraphicsScene(this)),
       m_leftInfoPanel(nullptr), m_infoPanel(nullptr), m_combatTimer(new QTimer(this)), m_countdownTimer(nullptr),
-      m_resultTimer(nullptr), m_resultOverlay(nullptr), m_resultText(nullptr),
+      m_resultTimer(nullptr), m_resultAnimTimer(nullptr), m_resultOverlay(nullptr), m_resultText(nullptr), m_resultCard(nullptr), m_resultAnimFrame(0),
       m_countdownOverlay(nullptr), m_countdownText(nullptr), m_countdownValue(0), m_dragActive(false),
       m_activeUnitId(-1), m_selectedUnitId(-1), m_sourceGrid(-1, -1), m_phase(GamePhase::Prepare),
       m_lastResult(QStringLiteral("请布置你的阵容。")), m_currentEvent(QStringLiteral("无")), m_eventRewardRound(0),
@@ -529,6 +530,18 @@ void Game::startCombat()
         m_lastResult = QStringLiteral("请先部署单位再开始战斗。");
         updateInfoPanel();
         return;
+    }
+
+    // Snapshot all player unit positions before combat mutates them
+    m_preCombatPositions.clear();
+    for (Unit* unit : m_units) {
+        if (!unit || unit->owner() != UnitOwner::PlayerCtrl) continue;
+        const QPoint pos = unit->position();
+        if (m_board.isValidPosition(pos) && m_board.getUnitAt(pos) == unit) {
+            m_preCombatPositions[unit->id()] = pos;
+        } else if (isBenchPosition(pos)) {
+            m_preCombatPositions[unit->id()] = pos;
+        }
     }
 
     // Reset all combat state, apply traits
@@ -674,18 +687,25 @@ void Game::setupRoundBoard(bool preservePlayerLayout)
     int boardSlotsUsed = 0;
     QSet<int> placedIds;
 
-    // Pass 1: restore saved board positions (if preserving layout)
+    // Pass 1: restore from pre-combat snapshot
     if (preservePlayerLayout) {
         for (Unit* unit : m_units) {
             if (!unit || unit->owner() != UnitOwner::PlayerCtrl) continue;
             if (boardSlotsUsed >= populationCap) break;
-            auto savedIt = savedPositions.constFind(unit->id());
-            if (savedIt != savedPositions.constEnd()) {
-                const QPoint& pos = savedIt.value();
-                if (m_board.isValidPosition(pos) && m_board.isPlayerHalf(pos) && !m_board.hasUnitAt(pos)) {
-                    m_board.addUnit(unit, pos);
+            auto savedIt = m_preCombatPositions.constFind(unit->id());
+            if (savedIt == m_preCombatPositions.constEnd()) continue;
+            const QPoint& pos = savedIt.value();
+            if (m_board.isValidPosition(pos) && m_board.isPlayerHalf(pos) && !m_board.hasUnitAt(pos)) {
+                m_board.addUnit(unit, pos);
+                placedIds.insert(unit->id());
+                ++boardSlotsUsed;
+            } else {
+                // Bench position restore
+                const int slot = pos.x();
+                if (slot >= 0 && slot < m_benchSlots.size() && !m_benchSlots.at(slot)) {
+                    m_benchSlots[slot] = unit;
+                    unit->setPosition(pos);
                     placedIds.insert(unit->id());
-                    ++boardSlotsUsed;
                 }
             }
         }
@@ -2195,7 +2215,7 @@ void Game::finishCombat(bool playerWon)
                            .arg(reward.name());
         addLog(m_lastResult);
         unlockAchievement(QStringLiteral("初战告捷"));
-        showResultOverlay(true);
+        showResultOverlay(true, reward);
     } else {
         m_player.setLossStreak(m_player.lossStreak() + 1);
         m_player.setWinStreak(0);
@@ -2214,83 +2234,196 @@ void Game::finishCombat(bool playerWon)
     syncFromBoard();
 }
 
-void Game::showResultOverlay(bool playerWon)
+void Game::showResultOverlay(bool playerWon, const Equipment& reward)
 {
     m_phase = GamePhase::PostCombat;
 
-    if (!m_resultOverlay) {
-        const QRectF sceneRect = m_scene->sceneRect();
-        const QRectF overlayRect(sceneRect.left(), sceneRect.top(),
-                                 sceneRect.width(), sceneRect.height());
-        m_resultOverlay = m_scene->addRect(overlayRect,
-            QPen(Qt::NoPen), QBrush(QColor(0, 0, 0, 150)));
-        m_resultOverlay->setZValue(5.0);
+    const QRectF sceneRect = m_scene->sceneRect();
 
-        QFont resultFont;
-        resultFont.setPointSize(36);
-        resultFont.setBold(true);
-        m_resultText = m_scene->addText(QString(), resultFont);
-        m_resultText->setZValue(5.1);
+    // --- overlay curtain ---
+    if (!m_resultOverlay) {
+        m_resultOverlay = m_scene->addRect(sceneRect, QPen(Qt::NoPen), QBrush(QColor(0, 0, 0, 150)));
+        m_resultOverlay->setZValue(5.0);
     } else {
+        m_resultOverlay->setRect(sceneRect);
         m_resultOverlay->setVisible(true);
-        m_resultText->setVisible(true);
     }
 
-    // Build multi-line result display
+    // --- card background (rounded rect drawn as QGraphicsRectItem + text) ---
+    const qreal cardW = 340.0;
+    const qreal cardH = 240.0;
+    const QRectF cardRect(sceneRect.center().x() - cardW / 2,
+                          sceneRect.center().y() - cardH / 2,
+                          cardW, cardH);
+
+    if (!m_resultCard) {
+        m_resultCard = m_scene->addRect(cardRect,
+            QPen(QColor(255, 218, 107, 200), 2.5),
+            QBrush(QColor(25, 20, 35, 240)));
+        m_resultCard->setZValue(5.2);
+    } else {
+        m_resultCard->setRect(cardRect);
+        m_resultCard->setVisible(true);
+    }
+
+    // --- title + detail text ---
     const int interest = interestGold();
     const int streakBonus = streakBonusGold(playerWon);
+
     QStringList lines;
     if (playerWon) {
-        lines << QStringLiteral("★ 胜利! ★");
-        lines << QStringLiteral("");
+        lines << QStringLiteral("★  胜  利  ★");
         lines << QStringLiteral("基础奖励  +%1").arg(GameConstants::kVictoryGold);
-        if (interest > 0) lines << QStringLiteral("利息       +%1").arg(interest);
+        if (interest > 0)   lines << QStringLiteral("利息       +%1").arg(interest);
         if (streakBonus > 0) lines << QStringLiteral("连胜奖金  +%1").arg(streakBonus);
-        lines << QStringLiteral("装备掉落  %1").arg(randomEquipment().name());
+        lines << QStringLiteral("装备掉落  %1").arg(reward.name());
     } else {
-        lines << QStringLiteral("● 失败");
-        lines << QStringLiteral("");
+        lines << QStringLiteral("●  失  败  ●");
         lines << QStringLiteral("生命 -%1").arg(GameConstants::kHpLossOnDefeat);
         lines << QStringLiteral("基础金币  +%1").arg(GameConstants::kLossGold);
-        if (interest > 0) lines << QStringLiteral("利息       +%1").arg(interest);
+        if (interest > 0)   lines << QStringLiteral("利息       +%1").arg(interest);
         if (streakBonus > 0) lines << QStringLiteral("连败补偿  +%1").arg(streakBonus);
     }
 
     const QColor titleColor = playerWon ? QColor(255, 218, 107) : QColor(230, 92, 92);
-    const QColor detailColor(220, 220, 220);
+    const QColor detailColor(210, 210, 210);
 
-    QString html = QStringLiteral("<div style='text-align:center; font-size:36pt; font-weight:bold; color:%1;'>%2</div>")
+    QString html = QStringLiteral(
+        "<div style='text-align:center; font-size:32pt; font-weight:bold; color:%1; margin-bottom:12px;'>%2</div>")
         .arg(titleColor.name(), lines.at(0).toHtmlEscaped());
-    for (int i = 2; i < lines.size(); ++i) {
-        html += QStringLiteral("<div style='text-align:center; color:%1; font-size:16pt; margin-top:2px;'>%2</div>")
+
+    for (int i = 1; i < lines.size(); ++i) {
+        html += QStringLiteral(
+            "<div style='text-align:center; color:%1; font-size:14pt; margin-top:3px;'>%2</div>")
             .arg(detailColor.name(), lines.at(i).toHtmlEscaped());
     }
 
+    if (!m_resultText) {
+        m_resultText = m_scene->addText(QString());
+        m_resultText->setZValue(5.3);
+    }
     m_resultText->setHtml(html);
-    m_resultText->setTextWidth(0); // auto-width
-    const QRectF sceneRect = m_scene->sceneRect();
+    m_resultText->setTextWidth(cardW - 20);
     const QRectF textRect = m_resultText->boundingRect();
     m_resultText->setPos(sceneRect.center().x() - textRect.width() / 2,
-                         sceneRect.center().y() - textRect.height() / 2);
+                         cardRect.top() + (cardH - textRect.height()) / 2);
+    m_resultText->setVisible(true);
 
-    // Auto-dismiss after 2.5s
+    // --- particle sparkles ---
+    spawnResultParticles(cardRect, playerWon);
+
+    // --- entrance animation ---
+    m_resultAnimFrame = 0;
+    if (!m_resultAnimTimer) {
+        m_resultAnimTimer = new QTimer(this);
+        m_resultAnimTimer->setInterval(16); // ~60 fps
+        connect(m_resultAnimTimer, &QTimer::timeout, this, &Game::tickResultAnimation);
+    }
+    m_resultAnimTimer->start();
+
+    // --- auto-dismiss after 2.8s ---
     if (!m_resultTimer) {
         m_resultTimer = new QTimer(this);
         m_resultTimer->setSingleShot(true);
         connect(m_resultTimer, &QTimer::timeout, this, &Game::dismissResultOverlay);
     }
-    m_resultTimer->start(2500);
+    m_resultTimer->start(2800);
+}
+
+void Game::spawnResultParticles(const QRectF& cardRect, bool playerWon)
+{
+    // Clean up previous particles
+    for (QGraphicsEllipseItem* p : m_resultParticles) {
+        m_scene->removeItem(p);
+        delete p;
+    }
+    m_resultParticles.clear();
+
+    const QColor color = playerWon ? QColor(255, 218, 107) : QColor(230, 92, 92);
+    auto rng = QRandomGenerator::global();
+    const qreal cx = cardRect.center().x();
+    const qreal cy = cardRect.center().y();
+
+    for (int i = 0; i < 40; ++i) {
+        auto* dot = m_scene->addEllipse(-3, -3, 6, 6, QPen(Qt::NoPen), QBrush(color));
+        dot->setZValue(5.4);
+        const qreal angle = 2.0 * M_PI * rng->generateDouble();
+        const qreal dist = rng->bounded(60.0);
+        dot->setPos(cx + std::cos(angle) * dist, cy + std::sin(angle) * dist);
+        dot->setOpacity(0.0);
+        // stash initial data in the item's data(0) / data(1)
+        dot->setData(0, angle);
+        dot->setData(1, dist);
+        dot->setData(2, rng->bounded(40, 120));  // max distance
+        m_resultParticles.append(dot);
+    }
+}
+
+void Game::tickResultAnimation()
+{
+    ++m_resultAnimFrame;
+    const qreal t = qMin(1.0, m_resultAnimFrame / 30.0); // entrance over ~0.5s
+    // ease-out cubic
+    const qreal ease = 1.0 - std::pow(1.0 - t, 3.0);
+
+    // Scale card from 0.6 → 1.0
+    if (m_resultCard) {
+        QTransform tr;
+        tr.translate(m_resultCard->rect().center().x(), m_resultCard->rect().center().y());
+        tr.scale(0.6 + 0.4 * ease, 0.6 + 0.4 * ease);
+        tr.translate(-m_resultCard->rect().center().x(), -m_resultCard->rect().center().y());
+        m_resultCard->setTransform(tr);
+    }
+
+    // Fade text in
+    if (m_resultText) {
+        m_resultText->setOpacity(ease);
+    }
+
+    // Animate particles outward
+    for (QGraphicsEllipseItem* dot : m_resultParticles) {
+        const qreal angle = dot->data(0).toDouble();
+        const qreal startDist = dot->data(1).toDouble();
+        const qreal maxDist = dot->data(2).toDouble();
+        const qreal dist = startDist + (maxDist - startDist) * ease;
+        const qreal cx = (m_resultCard ? m_resultCard->rect().center().x() : 400.0);
+        const qreal cy = (m_resultCard ? m_resultCard->rect().center().y() : 300.0);
+        dot->setPos(cx + std::cos(angle) * dist, cy + std::sin(angle) * dist);
+        dot->setOpacity(ease * 0.8);
+    }
+
+    // Stop animation when done
+    if (t >= 1.0 && m_resultAnimTimer) {
+        m_resultAnimTimer->stop();
+    }
 }
 
 void Game::dismissResultOverlay()
 {
+    if (m_resultAnimTimer) {
+        m_resultAnimTimer->stop();
+    }
+
+    // Clean up particles
+    for (QGraphicsEllipseItem* p : m_resultParticles) {
+        m_scene->removeItem(p);
+        delete p;
+    }
+    m_resultParticles.clear();
+
     if (m_resultOverlay) {
         m_resultOverlay->setVisible(false);
+    }
+    if (m_resultCard) {
+        m_resultCard->setVisible(false);
+        m_resultCard->setTransform(QTransform()); // reset scale
+    }
+    if (m_resultText) {
         m_resultText->setVisible(false);
+        m_resultText->setOpacity(1.0);
     }
 
     // Now actually advance the game state
-    // (the finishCombat logic that was deferred)
     const bool playerWon = m_player.winStreak() > 0;
 
     if (playerWon) {
@@ -2438,6 +2571,7 @@ void Game::buildScene()
     m_countdownText = nullptr;
     m_resultOverlay = nullptr;
     m_resultText = nullptr;
+    m_resultCard = nullptr;
     m_gridItems.clear();
     m_unitItems.clear();
     m_unitItemById.clear();
